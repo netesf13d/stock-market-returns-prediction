@@ -18,7 +18,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (OneHotEncoder,
                                    StandardScaler,
                                    FunctionTransformer)
-from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.linear_model import LinearRegression, Lasso, Ridge
 
 
 # =============================================================================
@@ -164,11 +164,194 @@ No effect
 Our convolutional model would be unable to capture such periodicity in returns.
 """
 
+# %% Utils
+"""
+## Utils
+
+"""
+
+def metric(Y_pred: np.ndarray, Y_true: np.ndarray)-> float:
+    """
+    TODO doc
+
+    Parameters
+    ----------
+    Y_pred, Y_true : 2D np.ndarray of shape (N, depth)
+        DESCRIPTION.
+    """
+    norm_pred = np.sqrt(np.sum(Y_pred**2, axis=1))
+    norm_true = np.sqrt(np.sum(Y_true**2, axis=1))
+    return np.mean(np.sum(Y_true*Y_pred, axis=1)/(norm_true*norm_pred))
+
+
+def to_csv(vectors: np.ndarray, fname: str)-> None:
+    """
+    Export 2D array `vectors` to submittable csv format.
+    """
+    norms = np.sqrt(np.sum(vectors**2, axis=1))
+    vectors = (vectors / norms[:, np.newaxis]).ravel()
+    
+    data = np.concatenate([vectors, norms])
+    data = np.stack([np.arange(len(data)), data], axis=1)
+    
+    # data = np.empty((len(vectors)+len(norms), 2), dtype=float)
+    # data[:, 0] = np.arange(len(data))
+    # data[:len(vectors)] = vectors
+    
+    np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
+               header=',0', comments='')
+    
+
+
+##
+n_stocks = 50
+n_vectors = 10
+depth = 250
+N = stock_returns.shape[1] - depth
+X = np.stack([stock_returns[:, i:i+depth] for i in range(N)])
+Y = np.stack([stock_returns[:, i+depth] for i in range(N)])
+
+
 # %%
 """
+## A single vector
+
+!!! calculs pour montrer que ça correspond plus ou moins à du ridge
+"""
+
+##
+model = Ridge(alpha=1, fit_intercept=False)
+cv = KFold(n_splits=5, shuffle=True, random_state=1234)
+alphas = np.logspace(-4, 4, 28)
+metrics = np.full_like(alphas, -1, dtype=float)
+for i, alpha in enumerate(alphas):
+    model.alpha = alpha
+    Y_pred = np.zeros_like(Y, dtype=float)
+    for itr, ival in cv.split(X, Y):
+        X_tr = X[itr].reshape(-1, depth)
+        Y_tr = Y[itr].ravel()
+        model.fit(X_tr, Y_tr)
+        
+        X_v = X[ival].reshape(-1, depth)
+        Y_pred[ival] = model.predict(X_v).reshape(-1, n_stocks)
+    metrics[i] = metric(Y_pred, Y)
+
+
+# %%
+
+## plot
+fig4, ax4 = plt.subplots(
+    nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
+    gridspec_kw={'left': 0.16, 'right': 0.92, 'top': 0.88, 'bottom': 0.14})
+fig4.suptitle("Figure 4: metric vs the regularization parameter",
+              x=0.02, ha='left')
+
+# day means
+ax4.plot(alphas, metrics, linestyle='-', marker='')
+ax4.set_xscale('log')
+ax4.set_xlim(1e-4, 1e4)
+ax4.set_xlabel('alpha')
+ax4.set_ylim(-0.014, -0.009)
+# ax4.set_yticks([-0.15, -0.05, 0.05, 0.15], minor=True)
+ax4.set_ylabel('Metric')
+ax4.grid(visible=True, linewidth=0.3)
+
+plt.show()
+
+"""
+WXe could select alpha = 10. Unfortunately, it is not possible to submit
+zero vectors.
+"""
+
+
+# %% 
+"""
+## Dimensionality reduction
 
 
 """
+
+XX = X.reshape(len(X), -1)
+# YY = 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# %%
+
+alpha = 10
+model = Ridge(alpha=alpha, fit_intercept=False)
+model.fit(X.reshape(-1, depth), Y.ravel())
+
+vectors = np.ones((10, depth), dtype=float)
+vectors[0] = model.coef_
+
+norms = np.sqrt(np.sum(vectors**2, axis=1))
+vectors[0] /= norms[0]
+
+to_csv(vectors, 'test.csv')
+
+
+
+# %%
+
+
+
+vectors = np.empty((n_vectors, depth), dtype=float)
+XX = X_tr.reshape(-1, depth)
+YY = Y_tr.ravel()
+for i in range(n_vectors):
+    ## get a vector factor
+    model = Ridge(alpha=1, fit_intercept=False)
+    model.fit(XX, YY)
+    vect = model.coef_
+    vect_norm = np.sqrt(np.sum(vect**2))
+    
+    vectors[i] = vect
+    ## substract the component to features and targets
+    overlap = np.sum(XX * vect, axis=1, keepdims=True)
+    XX -= overlap * vect / vect_norm**2
+    YY -= overlap.ravel()
+    
+    print(vect_norm)
+    print(overlap)
+    
+
+
+
+# a = model.coef_
+
+# %%
+
+Y_pred = model.predict(X_val.reshape(-1, depth)).reshape(X_val.shape[:-1])
+
+Y_pred_norm = np.sqrt(np.sum(Y_pred**2, axis=1))
+Y_val_norm = np.sqrt(np.sum(Y_val**2, axis=1))
+
+mean_overlap = np.mean(np.sum(Y_val*Y_pred, axis=1)/(Y_pred_norm*Y_val_norm))
+
+print(mean_overlap)
+
+
+
+
+
+
+
+
+
+
 
 
 
