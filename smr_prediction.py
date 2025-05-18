@@ -6,6 +6,7 @@ Noice
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from numpy.random import default_rng
 
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
@@ -19,6 +20,7 @@ from sklearn.preprocessing import (OneHotEncoder,
                                    StandardScaler,
                                    FunctionTransformer)
 from sklearn.linear_model import LinearRegression, Lasso, Ridge
+from sklearn.ensemble import AdaBoostRegressor, BaggingRegressor
 
 
 # =============================================================================
@@ -27,7 +29,7 @@ from sklearn.linear_model import LinearRegression, Lasso, Ridge
 
 # %% Data loading and preprocessing
 
-stock_returns = np.loadtxt('./X_train_YG7NZSq.csv', delimiter=',', skiprows=1)[:, 1:]
+stock_returns = np.loadtxt('./X_train.csv', delimiter=',', skiprows=1)[:, 1:]
 # Y = np.loadtxt('./Y_train_wz11VM6.csv', delimiter=',', skiprows=1)
 
 X = stock_returns
@@ -176,12 +178,13 @@ def metric(Y_pred: np.ndarray, Y_true: np.ndarray)-> float:
 
     Parameters
     ----------
-    Y_pred, Y_true : 2D np.ndarray of shape (N, depth)
+    Y_pred, Y_true : broadcastable (n+2)D np.ndarray of shape (..., N=504, n_stocks=50)
         DESCRIPTION.
     """
-    norm_pred = np.sqrt(np.sum(Y_pred**2, axis=1))
-    norm_true = np.sqrt(np.sum(Y_true**2, axis=1))
-    return np.mean(np.sum(Y_true*Y_pred, axis=1)/(norm_true*norm_pred))
+    norm_pred = np.sqrt(np.sum(Y_pred**2, axis=-1))
+    norm_true = np.sqrt(np.sum(Y_true**2, axis=-1))
+    scalar_product = np.sum(Y_true*Y_pred, axis=-1)
+    return np.mean(scalar_product/(norm_true*norm_pred), axis=-1)
 
 
 def to_csv(vectors: np.ndarray, fname: str)-> None:
@@ -202,39 +205,194 @@ def to_csv(vectors: np.ndarray, fname: str)-> None:
                header=',0', comments='')
     
 
+def array_to_csv(vectors: np.ndarray, fname: str)-> None:
+    """
+    Export 2D array `vectors` to submittable csv format.
+    """
+    norms = np.sqrt(np.sum(vectors**2, axis=1))
+    vectors = (vectors / norms[:, np.newaxis]).ravel()
+    
+    data = np.concatenate([vectors, norms])
+    data = np.stack([np.arange(len(data)), data], axis=1)
+    
+    np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
+               header=',0', comments='')
+
+
+def vector_to_csv(vector: np.ndarray, fname: str)-> None:
+    """
+    
+    """
+    norms = vector[:10]
+    norms[-1] = np.sqrt(np.sum(vector[9:]**2))
+    
+    vectors = np.eye(10, 250, dtype=float)
+    vectors[-1, 9:] = vector[9:] / norms[-1]
+    
+    data = np.concatenate([vectors, norms])
+    data = np.stack([np.arange(len(data)), data], axis=1)
+    
+    np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
+               header=',0', comments='')
+
+
+def metric_gradient(past_returns: np.ndarray,
+                    weights: np.ndarray,
+                    norm_tgt_returns: np.ndarray)-> np.ndarray:
+    """
+    Compute the gradient of the metric.
+
+    Parameters
+    ----------
+    past_returns : 3D np.ndarray of shape (N, n_stocks=50, depth=250)
+        DESCRIPTION.
+    weights : 1D np.ndarray of shape (depth=250,)
+        DESCRIPTION.
+    norm_tgt_returns : 2D np.ndarray of shape (N, n_stocks=50)
+        DESCRIPTION.
+    """
+    pred_returns = np.sum(past_returns*weights, axis=-1)
+    pred_returns_norm = np.sqrt(np.sum(pred_returns**2, axis=1, keepdims=True))
+    
+    grad1 = np.sum(past_returns * norm_tgt_returns[..., None], axis=1)
+    grad1 = np.mean(grad1 / pred_returns_norm, axis=0)
+    
+    proj = np.sum(pred_returns * norm_tgt_returns, axis=1, keepdims=True)
+    grad2 = np.sum(past_returns * pred_returns[..., None], axis=1)
+    grad2 = np.mean(grad2 * proj / pred_returns_norm**2, axis=0)
+    # print(pred_returns_norm.flatten())
+        
+    return grad1 - grad2
+
+
+
+class SGDOptimizer():
+    
+    def __init__(self,
+                 weights: np.ndarray,
+                 learning_rate: float = 0.01,
+                 momentum: float = 0.9,
+                 nesterov: bool = False):
+        """
+        TODO doc
+
+        Parameters
+        ----------
+        weights : np.ndarray
+            Initial weights.
+        learning_rate : float, optional
+            DESCRIPTION. The default is 0.01.
+        momentum : float, optional
+            DESCRIPTION. The default is 0.9.
+        nesterov : bool, optional
+            DESCRIPTION. The default is False.
+        """
+        self.learning_rate: float = learning_rate
+        self.momentum: float = momentum
+        self.nesterov: bool = nesterov
+        
+        self.weights = weights
+        self.momentum_vector = np.zeros_like(weights)
+    
+    
+    def reset(self, new_weights: np.ndarray)-> None:
+        """
+        Reset the optimizer with new weights, and set the momentum to zero.
+        """
+        self.weights = new_weights
+        self.momentum_vector = np.zeros_like(self.weights)
+    
+    
+    def eval_point(self,)-> np.ndarray:
+        """
+        Return the evaluation point 
+        """
+        if self.nesterov:
+            return self.weights + self.momentum * self.momentum_vector
+        else:
+            return self.weights
+    
+    
+    def apply_gradients(self, gradients: np.ndarray):
+        """
+        Update the momentum and weights.
+        - The radial component is removed from the momentum before updating
+          the weights.
+        - The weights are normalized to unit norm.
+        1. m <- b * m - lr * grad
+        2. m <- m - <m,w> * w
+        3. w <- w + m
+        4. w <- w / ||w||
+        
+        `gradients` must be 1D np.ndarray of the same shape as the weights.
+        """
+        m = (self.momentum * self.momentum_vector
+             - self.learning_rate * gradients)
+        m = m - np.sum(m*self.weights) * self.weights
+        self.momentum_vector = m
+        
+        w = self.weights + self.momentum_vector
+        self.weights = w / np.sqrt(np.sum(w**2))
+
 
 ##
 n_stocks = 50
-n_vectors = 10
+n_factors = 10
 depth = 250
-N = stock_returns.shape[1] - depth
-X = np.stack([stock_returns[:, i:i+depth] for i in range(N)])
-Y = np.stack([stock_returns[:, i+depth] for i in range(N)])
+n_steps = stock_returns.shape[1] - depth
+X = np.stack([stock_returns[:, i:i+depth] for i in range(n_steps)])
+Y = np.stack([stock_returns[:, i+depth] for i in range(n_steps)])
+
+
+# %%
+"""
+## Problem reduction
+"""
+
+a = np.zeros(250, dtype=float)
+a[0:5] = -0.00694934/np.sqrt(5)
+a[20:250] = 0.01560642/np.sqrt(230)
+
+Y_pred = np.sum(X*a[::-1], axis=-1)
+print(metric(Y_pred, Y))
+
 
 
 # %%
 """
 ## A single vector
-
-!!! calculs pour montrer que ça correspond plus ou moins à du ridge
 """
 
-##
-model = Ridge(alpha=1, fit_intercept=False)
-cv = KFold(n_splits=5, shuffle=True, random_state=1234)
-alphas = np.logspace(-4, 4, 28)
-metrics = np.full_like(alphas, -1, dtype=float)
+## normalize features and targets
+YY = Y / np.sqrt(np.sum(Y**2, axis=1, keepdims=True))
+XX = X / np.sqrt(np.sum(X**2, axis=1, keepdims=True))
+
+## training metric
+model = Lasso(alpha=1, fit_intercept=False)
+alphas = np.concatenate([np.logspace(-6, -4, 11), np.logspace(-4, -3, 11)])
+tr_metric = np.full_like(alphas, -1, dtype=float)
+for i, alpha in enumerate(alphas):
+    model.alpha = alpha
+    model.fit(XX.reshape(-1, depth), YY.ravel())
+    weights = model.coef_
+    
+    Y_pred = np.sum(X*weights, axis=-1)
+    tr_metric[i] = metric(Y_pred, Y)
+
+# %%
+## validation metric
+cv = KFold(n_splits=10, shuffle=True, random_state=1234)
+val_metric = np.full_like(alphas, -1, dtype=float)
 for i, alpha in enumerate(alphas):
     model.alpha = alpha
     Y_pred = np.zeros_like(Y, dtype=float)
-    for itr, ival in cv.split(X, Y):
-        X_tr = X[itr].reshape(-1, depth)
-        Y_tr = Y[itr].ravel()
+    for itr, ival in cv.split(XX, YY):
+        X_tr = XX[itr].reshape(-1, depth)
+        Y_tr = YY[itr].ravel()
         model.fit(X_tr, Y_tr)
-        
-        X_v = X[ival].reshape(-1, depth)
+        X_v = XX[ival].reshape(-1, depth)
         Y_pred[ival] = model.predict(X_v).reshape(-1, n_stocks)
-    metrics[i] = metric(Y_pred, Y)
+    val_metric[i] = metric(Y_pred, Y)
 
 
 # %%
@@ -242,118 +400,286 @@ for i, alpha in enumerate(alphas):
 ## plot
 fig4, ax4 = plt.subplots(
     nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
-    gridspec_kw={'left': 0.16, 'right': 0.92, 'top': 0.88, 'bottom': 0.14})
+    gridspec_kw={'left': 0.12, 'right': 0.92, 'top': 0.83, 'bottom': 0.14})
 fig4.suptitle("Figure 4: metric vs the regularization parameter",
               x=0.02, ha='left')
 
-# day means
-ax4.plot(alphas, metrics, linestyle='-', marker='')
+
+l_tr, = ax4.plot(alphas, tr_metric, linestyle='-', marker='')
+l_val, = ax4.plot(alphas, val_metric, linestyle='-', marker='')
 ax4.set_xscale('log')
-ax4.set_xlim(1e-4, 1e4)
+ax4.set_xlim(1e-6, 1e-3)
 ax4.set_xlabel('alpha')
-ax4.set_ylim(-0.014, -0.009)
-# ax4.set_yticks([-0.15, -0.05, 0.05, 0.15], minor=True)
+ax4.set_ylim(-0.02, 0.15)
 ax4.set_ylabel('Metric')
 ax4.grid(visible=True, linewidth=0.3)
+ax4.grid(visible=True, which='minor', linewidth=0.2)
+
+fig4.legend(handles=[l_tr, l_val],
+            labels=['Training set', 'Validation set'],
+            ncols=2, loc=(0.27, 0.84), alignment='center')
 
 plt.show()
 
 """
-WXe could select alpha = 10. Unfortunately, it is not possible to submit
-zero vectors.
+We get a score of about 0.03 with alpha = 4e-4, this is similar to the benchmark.
+This score actually depends strongly on the cross-validation splits.
+"""
+
+
+# %%
+"""
+## Bruteforce v2
+
+Having reduced the problem, we can now apply the bruteforce approach much more efficiently.
+"""
+
+rng = default_rng(1234)
+
+
+niter = 20
+best_metric = -1
+for i in range(niter):
+    vectors = rng.normal(size=(10000, depth))
+    Y_pred = np.tensordot(vectors, X, [[1], [2]])
+    res = metric(Y_pred, Y)
+    
+    best_idx = np.argmax(res)
+    if res[best_idx] > best_metric:
+        best_metric = res[best_idx]
+        best_vector = vectors[best_idx]
+        print(f'iteration {i}, best metric :', best_metric)
+
+print(best_metric)
+
+"""
+Not bad! We get results similar to the benchmark. Two differences though:
+- We tried 200k solutions instead of 1000*10 vectors;
+- Having the solution in 'merged' form, we could not fit individual contributions.
+
+All in all, this approach seems to have roughly the same efficiency as that of the notebook.
+What we gain in sampling speed we lose in optimization freedom.
 """
 
 
 # %% 
 """
-## Dimensionality reduction
+## Gradient descent
+
+"""
+w0 = rng.normal(size=depth)
+w0 = w0 / np.sqrt(np.sum(w0**2)) 
+
+## Set training parameters
+n_epochs = 60
+batch_size = 16
+optimizer = SGDOptimizer(w0, learning_rate=0.05, momentum=0.0, nesterov=False)
+
+
+## Training metric
+rng = default_rng(1234)
+idx = np.arange(len(X))
+tr_metric = np.zeros(n_epochs+1, dtype=float)
+
+Y_pred = np.sum(X * w0, axis=-1)
+tr_metric[0] = metric(Y_pred, Y)
+print(f'epoch 0/{n_epochs} : train metric {tr_metric[0]:.4f}')
+
+for i in range(n_epochs):
+    rng.shuffle(idx)
+    for j in range((len(idx)+batch_size-1) // batch_size):
+        X_ = X[idx[j*batch_size:(j+1)*batch_size]]
+        Y_ = YY[idx[j*batch_size:(j+1)*batch_size]]
+        w = optimizer.eval_point()
+        grad = -metric_gradient(X_, w, Y_)
+        optimizer.apply_gradients(grad)
+    
+    Y_pred = np.sum(X * optimizer.weights, axis=-1)
+    tr_metric[i+1] = metric(Y_pred, Y)
+    if i % 10 == 9:
+        print(f'epoch {i+1}/{n_epochs} : train metric {tr_metric[i]:.4f}')
+        
+    
+# %%
+
+## Validation metric
+rng = default_rng(1234)
+cv = KFold(n_splits=4, shuffle=True, random_state=1234)
+
+val_metric = np.zeros(n_epochs+1, dtype=float)
+val_metric[0] = tr_metric[0]
+Y_pred = np.zeros((n_epochs,) + Y.shape, dtype=float)
+
+for itr, ival in cv.split(X, YY):
+    optimizer.reset(w0)
+    X_v = X[ival]
+    for i in range(n_epochs):
+        rng.shuffle(itr)
+        for j in range((len(itr)+batch_size-1) // batch_size):
+            X_ = X[itr[j*batch_size:(j+1)*batch_size]]
+            Y_ = YY[itr[j*batch_size:(j+1)*batch_size]]
+            w = optimizer.eval_point()
+            grad = -metric_gradient(X_, w, Y_)
+            optimizer.apply_gradients(grad)
+        Y_pred[i, ival] = np.sum(X_v * optimizer.weights, axis=-1)
+val_metric[1:] = metric(Y_pred, Y)
+
+
+# %%
+## plot
+fig5, ax5 = plt.subplots(
+    nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
+    gridspec_kw={'left': 0.125, 'right': 0.94, 'top': 0.83, 'bottom': 0.14})
+fig5.suptitle("Figure 5: Metric evolution with SGD training",
+              x=0.02, ha='left')
+
+
+l_tr, = ax5.plot(np.arange(n_epochs+1), tr_metric, linestyle='-', marker='')
+l_val, = ax5.plot(np.arange(n_epochs+1), val_metric, linestyle='-', marker='')
+
+ax5.set_xlim(0, n_epochs)
+ax5.set_xlabel('epoch')
+ax5.set_ylim(-0.01, 0.16)
+ax5.set_ylabel('Metric')
+ax5.grid(visible=True, linewidth=0.3)
+
+fig5.legend(handles=[l_tr, l_val],
+            labels=['Training set', 'Validation set'],
+            ncols=2, loc=(0.27, 0.84), alignment='center')
+
+plt.show()
+
+"""
+The algorithm is clearly overfitting.
+"""
+
+# %%
+"""
+## Using more constrained functions.
+
+Does not work...
+"""
+
+X2 = np.empty((n_steps, n_stocks, 10), dtype=float)
+X2[..., -3:] = X[..., -3:]
+for i in range(1, 8):
+    X2[..., -3-i] = np.sum(X[..., -1-2**(i+1):-1-2**i], axis=-1)
+
+
+# %%
+"""
+## Add a regularity constraint
 
 
 """
 
-XX = X.reshape(len(X), -1)
-# YY = 
+
+def grad_l1_penalty(weights: np.ndarray,
+                    penalty_factor: float,
+                    )-> np.ndarray:
+    """
+    Compute the gradient of a L1 penalty: lambda * |w[i+1] - w[i]|.
+    """
+    diff_sign = np.diff(weights)
+    l1_grad = np.zeros_like(weights, dtype=float)
+    l1_grad[1:] = diff_sign
+    l1_grad[:-1] -= diff_sign
+    return penalty_factor*l1_grad
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# %%
-
-alpha = 10
-model = Ridge(alpha=alpha, fit_intercept=False)
-model.fit(X.reshape(-1, depth), Y.ravel())
-
-vectors = np.ones((10, depth), dtype=float)
-vectors[0] = model.coef_
-
-norms = np.sqrt(np.sum(vectors**2, axis=1))
-vectors[0] /= norms[0]
-
-to_csv(vectors, 'test.csv')
-
+def grad_l2_penalty(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
+    """
+    Compute the gradient of a L2 penalty: lambda * (w[i+1] - w[i])^2.
+    """
+    diff = np.diff(weights)
+    l2_grad = np.zeros_like(weights, dtype=float)
+    l2_grad[1:] = diff
+    l2_grad[:-1] -= diff
+    return 2*penalty_factor*l2_grad
 
 
 # %%
 
+w0 = rng.normal(size=depth)
+w0 = w0 / np.sqrt(np.sum(w0**2))
+
+## Set training parameters
+n_epochs = 100
+batch_size = 16
+reg_param = 10
+optimizer = SGDOptimizer(w0, learning_rate=0.01, momentum=0.8, nesterov=True)
 
 
-vectors = np.empty((n_vectors, depth), dtype=float)
-XX = X_tr.reshape(-1, depth)
-YY = Y_tr.ravel()
-for i in range(n_vectors):
-    ## get a vector factor
-    model = Ridge(alpha=1, fit_intercept=False)
-    model.fit(XX, YY)
-    vect = model.coef_
-    vect_norm = np.sqrt(np.sum(vect**2))
+## Training metric
+rng = default_rng(1234)
+idx = np.arange(len(X))
+tr_metric = np.zeros(n_epochs+1, dtype=float)
+
+Y_pred = np.sum(X * w0, axis=-1)
+tr_metric[0] = metric(Y_pred, Y)
+print(f'epoch 0/{n_epochs} : train metric {tr_metric[0]:.4f}')
+
+for i in range(n_epochs):
+    rng.shuffle(idx)
+    for j in range((len(idx)+batch_size-1) // batch_size):
+        X_ = X[idx[j*batch_size:(j+1)*batch_size]]
+        Y_ = YY[idx[j*batch_size:(j+1)*batch_size]]
+        w = optimizer.eval_point()
+        grad = -metric_gradient(X_, w, Y_) + grad_l1_penalty(w, reg_param)
+        optimizer.apply_gradients(grad)
     
-    vectors[i] = vect
-    ## substract the component to features and targets
-    overlap = np.sum(XX * vect, axis=1, keepdims=True)
-    XX -= overlap * vect / vect_norm**2
-    YY -= overlap.ravel()
+    Y_pred = np.sum(X * optimizer.weights, axis=-1)
+    tr_metric[i+1] = metric(Y_pred, Y)
+    if i % 10 == 9:
+        print(f'epoch {i+1}/{n_epochs} : train metric {tr_metric[i]:.4f}')
+        
     
-    print(vect_norm)
-    print(overlap)
-    
-
-
-
-# a = model.coef_
-
 # %%
 
-Y_pred = model.predict(X_val.reshape(-1, depth)).reshape(X_val.shape[:-1])
+## Validation metric
+rng = default_rng(1234)
+cv = KFold(n_splits=4, shuffle=True, random_state=1234)
 
-Y_pred_norm = np.sqrt(np.sum(Y_pred**2, axis=1))
-Y_val_norm = np.sqrt(np.sum(Y_val**2, axis=1))
+val_metric = np.zeros(n_epochs+1, dtype=float)
+val_metric[0] = tr_metric[0]
+Y_pred = np.zeros((n_epochs,) + Y.shape, dtype=float)
 
-mean_overlap = np.mean(np.sum(Y_val*Y_pred, axis=1)/(Y_pred_norm*Y_val_norm))
-
-print(mean_overlap)
-
-
-
-
-
-
-
-
-
-
-
-
+for itr, ival in cv.split(X, YY):
+    optimizer.reset(w0)
+    X_v = X[ival]
+    for i in range(n_epochs):
+        rng.shuffle(itr)
+        for j in range((len(itr)+batch_size-1) // batch_size):
+            X_ = X[itr[j*batch_size:(j+1)*batch_size]]
+            Y_ = YY[itr[j*batch_size:(j+1)*batch_size]]
+            w = optimizer.eval_point()
+            grad = -metric_gradient(X_, w, Y_) + grad_l1_penalty(w, reg_param)
+            optimizer.apply_gradients(grad)
+        Y_pred[i, ival] = np.sum(X_v * optimizer.weights, axis=-1)
+val_metric[1:] = metric(Y_pred, Y)
 
 
+# %%
+## plot
+fig5, ax5 = plt.subplots(
+    nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
+    gridspec_kw={'left': 0.125, 'right': 0.94, 'top': 0.83, 'bottom': 0.14})
+fig5.suptitle("Figure 5: Metric evolution with SGD training",
+              x=0.02, ha='left')
+
+
+l_tr, = ax5.plot(np.arange(n_epochs+1), tr_metric, linestyle='-', marker='')
+l_val, = ax5.plot(np.arange(n_epochs+1), val_metric, linestyle='-', marker='')
+
+ax5.set_xlim(0, n_epochs)
+ax5.set_xlabel('epoch')
+ax5.set_ylim(-0.01, 0.16)
+ax5.set_ylabel('Metric')
+ax5.grid(visible=True, linewidth=0.3)
+
+fig5.legend(handles=[l_tr, l_val],
+            labels=['Training set', 'Validation set'],
+            ncols=2, loc=(0.27, 0.84), alignment='center')
+
+plt.show()
 
