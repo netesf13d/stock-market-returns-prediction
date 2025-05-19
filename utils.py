@@ -3,9 +3,13 @@
 Utility functions.
 """
 
+from copy import deepcopy
 from typing import Callable
 
 import numpy as np
+from numpy.random import default_rng
+from sklearn.model_selection import KFold
+
 
 
 ###############################################################################
@@ -79,19 +83,19 @@ def grad_metric(X: np.ndarray,
 
 
 def grad_l1_diff(weights: np.ndarray,
-                    penalty_factor: float,
-                    )-> np.ndarray:
+                penalty_factor: float)-> np.ndarray:
     """
     Gradient of a L1 penalty: lambda * |w[i+1] - w[i]|.
     """
-    diff_sign = np.diff(weights)
+    diff_sign = np.sign(np.diff(weights))
     l1_grad = np.zeros_like(weights, dtype=float)
     l1_grad[1:] = diff_sign
     l1_grad[:-1] -= diff_sign
     return penalty_factor*l1_grad
 
 
-def grad_l2_diff(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
+def grad_l2_diff(weights: np.ndarray,
+                 penalty_factor: float)-> np.ndarray:
     """
     Gradient of a L2 penalty: lambda * (w[i+1] - w[i])^2.
     """
@@ -103,30 +107,30 @@ def grad_l2_diff(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
 
 
 def grad_l1_absdiff(weights: np.ndarray,
-                    penalty_factor: float,
-                    )-> np.ndarray:
+                    penalty_factor: float)-> np.ndarray:
     """
-    TODO
     Gradient of a L1 difference-of-absolute-values penalty:
         lambda * | |w[i+1]| - |w[i]| |.
     """
-    diff_sign = np.diff(weights)
+    sign = np.sign(weights)
+    sign_diff_abs = np.sign(np.diff(np.abs(weights)))
     l1_grad = np.zeros_like(weights, dtype=float)
-    l1_grad[1:] = diff_sign
-    l1_grad[:-1] -= diff_sign
+    l1_grad[1:] = sign_diff_abs * sign[1:]
+    l1_grad[:-1] -= sign_diff_abs * sign[:-1]
     return penalty_factor*l1_grad
 
 
-def grad_l2_absdiff(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
+def grad_l2_absdiff(weights: np.ndarray,
+                    penalty_factor: float)-> np.ndarray:
     """
-    TODO
     Gradient of a L2 difference-of-absolute-values penalty:
         lambda * ( |w[i+1]| - |w[i]| )^2.
     """
+    sign = np.sign(weights)
     diff = np.diff(weights)
     l2_grad = np.zeros_like(weights, dtype=float)
-    l2_grad[1:] = diff
-    l2_grad[:-1] -= diff
+    l2_grad[1:] = diff * sign[1:]
+    l2_grad[:-1] -= diff * sign[:-1]
     return 2*penalty_factor*l2_grad
 
 
@@ -205,12 +209,221 @@ class SGDOptimizer():
         self.weights = w / np.sqrt(np.sum(w**2))
 
 
-def sgd_train():
-    # TODO
-    pass
 
+def sgd_train(X: np.ndarray,
+              norm_Y: np.ndarray,
+              optimizer: SGDOptimizer,
+              gradient_func: Callable,
+              batch_size: int = 16,
+              n_epochs: int = 200,
+              random_state: int | None = None,
+              early_stopping: bool = False,
+              early_stop_patience: int = 0,
+              early_stop_min_delta: float = 0,
+              return_best_weights: bool = False,
+              verbose: bool = False,
+              )-> tuple[np.ndarray, float, float]:
+    """
+    Wrapper function for stochastic gradient descent training.
 
-def sgd_validation():
-    # TODO
-    pass
+    Parameters
+    ----------
+    X : 3D np.ndarray of shape (N, n_stocks=50, depth=250)
+        Past returns, the features.
+    norm_Y : 2D np.ndarray of shape (N, n_stocks=50)
+        Normalized target vectors.
+    optimizer : SGDOptimizer
+        The SGD opimizer instance.
+    gradient_func : Callable
+        A function (X, Y, weights) -> 1D np.ndarray of shape (depth,).
+        Gives the gradients of the loss function at the given weight values.
+    batch_size : int, optional
+        Size of the SGD batches. The default is 16.
+    n_epochs : int, optional
+        Max number of training epochs. The default is 200.
+    random_state : int | None, optional
+        Random state for training data shuffling. The default is None.
+    early_stopping : bool, optional
+        Enable early stopping. The default is False.
+    early_stop_patience : int, optional
+        Number of epochs with no improvement after which training will be
+        stopped. The default is 0.
+    early_stop_min_delta : float, optional
+        Minimum change in the metric to qualify as an improvement, i.e. an
+        absolute change of less than min_delta, will count as no improvement.
+        The default is 16.
+    return_best_weights : bool, optional
+        Whether to return model weights from the epoch with the best value of
+        the metric. If False, the model weights obtained at the last step of
+        training are returned. The default is False.
+    verbose : bool, optional
+        Displays the metric after each epoch.
+        The default is False.
+
+    Returns
+    -------
+    weights : 1D np.ndarray of shape (depth,)
+        The optimized model weights.
+    metric : float
+        The corresponding metric.
+    epoch : int
+        The last training epoch number.
+
+    """
+    rng = default_rng(random_state)
+    idx = np.arange(len(X))
     
+    best_weights = optimizer.weights
+    best_metric = metric(np.sum(X * optimizer.weights, axis=-1), norm_Y)
+    best_epoch = 0
+    last_metric = best_metric
+    last_epoch = 0
+    
+    for epoch in range(n_epochs):
+        rng.shuffle(idx)
+        
+        # epoch train
+        for j in range((len(idx)+batch_size-1) // batch_size):
+            X_ = X[idx[j*batch_size:(j+1)*batch_size]]
+            Y_ = norm_Y[idx[j*batch_size:(j+1)*batch_size]]
+            w = optimizer.eval_point()
+            optimizer.apply_gradients(gradient_func(X_,Y_, w))
+
+        # update best weights and metric        
+        curr_metric = metric(np.sum(X * optimizer.weights, axis=-1), norm_Y)
+        if return_best_weights and (curr_metric > best_metric):
+            best_weights = optimizer.weights
+            best_metric = curr_metric
+            best_epoch = epoch
+        
+        # early stopping
+        if early_stopping:
+            if curr_metric > last_metric + early_stop_min_delta:
+                last_metric = curr_metric
+                last_epoch = epoch
+            elif epoch - last_epoch > early_stop_patience:
+                break
+        
+        if verbose:
+            print(f'epoch {epoch+1}/{n_epochs} : metric {curr_metric:.4f}')
+    
+    if return_best_weights:
+        return best_weights, best_metric, best_epoch
+    else:
+        return optimizer.weights, curr_metric, epoch
+
+
+
+def sgd_cv_eval(X: np.ndarray,
+                norm_Y: np.ndarray,
+                optimizer: SGDOptimizer,
+                gradient_func: Callable,
+                 batch_size: int = 16,
+                 n_epochs: int = 200,
+                 random_state: int | None = None,
+                 cv_splits: int = 4,
+                 early_stopping: bool = False,
+                 early_stop_patience: int = 0,
+                 early_stop_min_delta: float = 0,
+                 return_best_weights: bool = False,
+                 verbose: bool = False,
+                 )-> tuple[float, float]:
+    """
+    Wrapper function for stochastic gradient descent model evaluation by cross
+    validation.
+
+    Parameters
+    ----------
+    X : 3D np.ndarray of shape (N, n_stocks=50, depth=250)
+        Past returns, the features.
+    norm_Y : 2D np.ndarray of shape (N, n_stocks=50)
+        Normalized target vectors.
+    optimizer : SGDOptimizer
+        The SGD opimizer instance.
+    gradient_func : Callable
+        A function (X, Y, weights) -> 1D np.ndarray of shape (depth,).
+        Gives the gradients of the loss function at the given weight values.
+    batch_size : int, optional
+        Size of the SGD batches. The default is 16.
+    n_epochs : int, optional
+        Max number of training epochs. The default is 200.
+    random_state : int | None, optional
+        Random state for training data shuffling. The default is None.
+    cv_splits : int, optional
+        Number of cross-validation splits. The default is 4.
+    early_stopping : bool, optional
+        Enable early stopping. The default is False.
+    early_stop_patience : int, optional
+        Number of epochs with no improvement after which training will be
+        stopped. The default is 0.
+    early_stop_min_delta : float, optional
+        Minimum change in the metric to qualify as an improvement, i.e. an
+        absolute change of less than min_delta, will count as no improvement.
+        The default is 16.
+    return_best_weights : bool, optional
+        Whether to return model weights from the epoch with the best value of
+        the metric. If False, the model weights obtained at the last step of
+        training are returned. The default is False.
+    verbose : bool, optional
+        Displays the metric after each epoch.
+        The default is False.
+
+    Returns
+    -------
+    metric : float
+        The cross-validation metric value.
+    epoch : int
+        The last training epoch number.
+    """
+    rng = default_rng(random_state)
+    cv = KFold(n_splits=cv_splits, shuffle=True, random_state=random_state)
+    idx = [[itr, ival] for itr, ival in cv.split(X, norm_Y)]
+
+    optimizers = [deepcopy(optimizer) for _ in range(cv_splits)]
+    Y_pred = np.empty_like(norm_Y, dtype=float)
+
+    best_weights = [opt.weights for opt in optimizers]
+    best_metric = metric(np.sum(X * optimizer.weights, axis=-1), norm_Y)
+    best_epoch = 0
+    last_metric = best_metric
+    last_epoch = 0
+    
+    for epoch in range(n_epochs):
+        
+        # epoch train for all CV splits
+        for i, (itr, ival) in enumerate(idx):
+            optim = optimizers[i]
+            X_v = X[ival]
+            rng.shuffle(itr)
+            
+            for j in range((len(itr)+batch_size-1) // batch_size):
+                X_ = X[itr[j*batch_size:(j+1)*batch_size]]
+                Y_ = norm_Y[itr[j*batch_size:(j+1)*batch_size]]
+                w = optim.eval_point()
+                optim.apply_gradients(gradient_func(X_,Y_, w))
+            
+            Y_pred[ival] = np.sum(X_v * optim.weights, axis=-1)
+
+        # update best metric        
+        curr_metric = metric(Y_pred, norm_Y)
+        if return_best_weights and (curr_metric > best_metric):
+            best_weights = [opt.weights for opt in optimizers]
+            best_metric = curr_metric
+            best_epoch = epoch
+
+        # early stopping
+        if early_stopping:
+            if curr_metric > last_metric + early_stop_min_delta:
+                last_metric = curr_metric
+                last_epoch = epoch
+            elif epoch - last_epoch > early_stop_patience:
+                break
+        
+        if verbose:
+            print(f'epoch {epoch+1}/{n_epochs} : metric {curr_metric:.4f}')
+    
+    if return_best_weights:
+        return np.array(best_weights), best_metric, best_epoch
+    else:
+        w = np.array([opt.weights for opt in optimizers])
+        return w, curr_metric, epoch
