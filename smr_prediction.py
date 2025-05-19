@@ -36,36 +36,9 @@ X = stock_returns
 
 
 # %% EDA
-"""
-### Distribution of means and variance
-"""
-
-fig1, ax1 = plt.subplots(
-    nrows=1, ncols=1, sharey=False, figsize=(5.4, 4.), dpi=100,
-    gridspec_kw={'left': 0.15, 'right': 0.96, 'top': 0.88, 'bottom': 0.13, 'wspace': 0.24})
-fig1.suptitle("Figure 1: Returns mean and standard deviation",
-              x=0.02, ha='left')
-
-ax1.plot(np.mean(stock_returns, axis=1), np.std(stock_returns, axis=1),
-         linestyle='', marker='o', markersize=4)
-
-ax1.set_xlim(-0.0016, 0.0016)
-ax1.set_xlabel('Average daily return', labelpad=6)
-ax1.set_ylim(0, 0.03)
-ax1.set_ylabel('Std deviation of daily returns', labelpad=7)
-ax1.grid(visible=True, linewidth=0.3)
-
-
-plt.show()
 
 """
-The daily returns are centered: the mean has probably been substracted to the original values.
-"""
-
-
-# %%
-"""
-### Evolution of the stock returns
+### Stock returns overview
 """
 
 COLORS = [
@@ -76,54 +49,121 @@ COLORS = [
     ]
 
 
-fig2, axs2 = plt.subplots(
+fig1, axs1 = plt.subplots(
     nrows=1, ncols=2, sharey=False, figsize=(8, 3.8), dpi=100,
     gridspec_kw={'left': 0.09, 'right': 0.97, 'top': 0.88, 'bottom': 0.15, 'wspace': 0.28})
-fig2.suptitle("Figure 2: Evolution of stock returns",
+fig1.suptitle("Figure 1: Evolution of stock returns",
               x=0.02, ha='left')
 
 # Returns
 for i, sr in enumerate(stock_returns):
-    axs2[0].plot(sr, linewidth=0.8, color=COLORS[(i+2)%24])
+    axs1[0].plot(sr, linewidth=0.8, color=COLORS[(i+2)%24])
 
-axs2[0].set_xlim(0, 800)
-axs2[0].set_xlabel('Date (days)')
-axs2[0].set_ylim(-0.25, 0.25)
-axs2[0].set_yticks([-0.15, -0.05, 0.05, 0.15], minor=True)
-axs2[0].set_ylabel('Daily return')
-axs2[0].grid(visible=True, linewidth=0.3)
-axs2[0].grid(visible=True, which='minor', linewidth=0.2)
+axs1[0].set_xlim(0, 800)
+axs1[0].set_xlabel('Date (days)')
+axs1[0].set_ylim(-0.25, 0.25)
+axs1[0].set_yticks([-0.15, -0.05, 0.05, 0.15], minor=True)
+axs1[0].set_ylabel('Daily return')
+axs1[0].grid(visible=True, linewidth=0.3)
+axs1[0].grid(visible=True, which='minor', linewidth=0.2)
 
 # Cummulative returns
 for i, sr in enumerate(np.cumsum(stock_returns, axis=1)):
-    axs2[1].plot(sr, linewidth=0.7, color=COLORS[(i+2)%24])
+    axs1[1].plot(sr, linewidth=0.7, color=COLORS[(i+2)%24])
 
-axs2[1].set_xlim(0, 800)
-axs2[1].set_xlabel('Date (days)')
-axs2[1].set_ylim(-1.25, 1.25)
-axs2[1].set_yticks([-1.25, -0.75, -0.25, 0.25, 0.75, 1.25], minor=True)
-axs2[1].set_ylabel('Cummulative return')
-axs2[1].grid(visible=True, linewidth=0.3)
-axs2[1].grid(visible=True, which='minor', linewidth=0.2)
+axs1[1].set_xlim(0, 800)
+axs1[1].set_xlabel('Date (days)')
+axs1[1].set_ylim(-1.25, 1.25)
+axs1[1].set_yticks([-1.25, -0.75, -0.25, 0.25, 0.75, 1.25], minor=True)
+axs1[1].set_ylabel('Cummulative return')
+axs1[1].grid(visible=True, linewidth=0.3)
+axs1[1].grid(visible=True, which='minor', linewidth=0.2)
 
 
 plt.show()
 
 r"""
+We plot in figure 1, for each stock, the returns variation over time (left panel) and the
+accumulated values (right panel). Most values are between -0.05 and 0.05, yet we also note
+the presence of extreme events with very large returns (both positive and negative).
+We can see the price kick caused by some of these events on the right panel
+(see for instance the green curve in the bottom right).
+"""
 
-Most valmues are between -0.05 and 0.05. We also note the presence of extreme events with
-very large returns (about $10\sigma$, which is virtually impossible for gaussian processes).
+#%%
+"""
+### Price returns distribution
+"""
+
+vals = np.logspace([-4], [0], 81)
+pos_returns_cdf = np.mean(stock_returns.ravel() >= vals, axis=1)
+neg_returns_cdf = np.mean(stock_returns.ravel() <= -vals, axis=1)
+
+
+fig2, axs2 = plt.subplots(
+    nrows=1, ncols=2, sharey=False, figsize=(8.2, 3.8), dpi=100,
+    gridspec_kw={'left': 0.085, 'right': 0.97, 'top': 0.88, 'bottom': 0.14, 'wspace': 0.26})
+fig2.suptitle("Figure 1: Price returns distribution",
+              x=0.02, ha='left')
+
+axs2[0].plot(100*np.mean(stock_returns, axis=1),
+             100*np.std(stock_returns, axis=1),
+         linestyle='', marker='o', markersize=4)
+
+axs2[0].set_xlim(-0.16, 0.16)
+axs2[0].set_xlabel('Average daily return (%)', labelpad=6)
+axs2[0].set_ylim(0, 3)
+axs2[0].set_ylabel('Std deviation of daily returns (%)', labelpad=7)
+axs2[0].grid(visible=True, linewidth=0.3)
+
+axs2[1].plot(vals, pos_returns_cdf, marker='+', linestyle='', markersize=4,
+             label='Positive returns')
+axs2[1].plot(vals, neg_returns_cdf, marker='+', linestyle='', markersize=4,
+             label='Negative returns')
+axs2[1].set_xscale('log')
+axs2[1].set_xlim(1e-4, 3e-1)
+axs2[1].set_yscale('log')
+axs2[1].set_ylim(1e-5, 1)
+axs2[1].grid(visible=True)
+axs2[1].set_xlabel('Absolute daily return')
+axs2[1].set_ylabel('Inv. cummulative distribution')
+axs2[1].legend()
+
+
+plt.show()
+
+r"""
+We present in figure 2 a scatter plot of the mean and standard deviation of returns
+for each stock (left panel), and the inverse cummulative distribution of the returns (right panel).
+
+The daily returns of each stock have zero mean, this indicates a preprocessing of the original values.
+The standard deviations for the various stocks are in the range 0.5 - 2.5%, with most values between 0.5 and 1.5%.
+
+The inverse cummulative distribution
+corresponds to $P(R \geq x)$ (positive returns) and $P(R \leq -x)$ (negative returns). We plot the values
+from the merged stocks. The global returns distribution is almost perfectly symmetric. Most of the returns
+fall in the range 0.001-0.01. Extreme returns, larger than 0.1, are not uncommon, and occur with a probability
+of about 1/2500. These extreme events can reach an amplitude of $10\sigma$,
+which is virtually impossible for gaussian processes.
 """
 
 # %%
 """
 ### Dependence of the returns on the week day
+
+The daily stock returns correspond to working days. However, we could expect monday
+stock returns to have larger variations than the other days. This would be due to
+the fact that monday follows the week end, which provides a longer time for market-affecting
+events to occur (therefore a higher probability of such events).
+
+In the context of this project, the required convolutional model would be unable
+to capture such periodicity in returns.
 """
 
 ##
 k = 5
 returns_std = np.std(stock_returns, axis=1)
-returns_mod = [X[:, i::k] for i in range(k)]
+returns_mod = [stock_returns[:, i::k] for i in range(k)]
 
 day_means = [np.mean(np.mean(x, axis=1) / returns_std) for x in returns_mod]
 day_stds = [np.mean(np.std(x, axis=1) / returns_std) for x in returns_mod]
@@ -162,9 +202,52 @@ plt.show()
 
 
 """
-No effect
-Our convolutional model would be unable to capture such periodicity in returns.
+Figure 3 presents the mean and standard deviations for each week day of the merged returns.
+The data is scaled by the standard deviation across the whole dataset. There seems to be no incidence
+of the week day on the returns. The given values certainly correspond to intra-day returns,
+which by construction must be insensitive to inter-day variations.
 """
+
+# %%
+"""
+### Correlations between stock prices
+"""
+
+fig4, ax4 = plt.subplots(
+    nrows=1, ncols=1, figsize=(7, 6.4), dpi=100,
+    gridspec_kw={'left': 0.03, 'right': 0.88, 'top': 0.89, 'bottom': 0.03, 'wspace': 0.24})
+cax4 = fig4.add_axes((0.89, 0.06, 0.025, 0.8))
+fig4.suptitle("Figure 4: Price returns correlation", x=0.02, ha='left')
+
+
+ax4.set_aspect('equal')
+cmap4 = plt.get_cmap('seismic').copy()
+cmap4.set_extremes(under='0.9', over='0.5')
+heatmap = ax4.pcolormesh(100*np.corrcoef(stock_returns)[::-1],
+                         cmap=cmap4, vmin=-80, vmax=80,
+                         edgecolors='0.2', linewidth=0.5)
+
+ax4.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
+ax4.set_xticks([0.5, 9.5, 19.5, 29.5, 39.5, 49.5], [1, 10, 20, 30, 40, 50])
+ax4.set_yticks([49.5, 39.5, 29.5, 19.5, 9.5, 0.5], [1, 10, 20, 30, 40, 50])
+
+
+pos = ax4.get_position().bounds
+x, y = pos[0], pos[1] + pos[3]
+
+fig4.colorbar(heatmap, cax=cax4, orientation="vertical", ticklocation="right")
+cax4.text(1.4, 1.03, 'Corr.\ncoef. (%)', fontsize=11, ha='center', transform=cax4.transAxes)
+
+
+plt.show()
+
+
+"""
+We present in figure 4 the correlation matrix of the prices returns for the 50 stocks of the dataset.
+The stocks are rather positively correlated, with correlation coefficients as large as 75% for some pairs.
+The negative correlations are less pronounced, extending to as low as -20%.
+"""
+
 
 # %% Utils
 """
@@ -174,12 +257,10 @@ Our convolutional model would be unable to capture such periodicity in returns.
 
 def metric(Y_pred: np.ndarray, Y_true: np.ndarray)-> float:
     """
-    TODO doc
+    Compute the cosine similarity between predicted and true returns.
+    The cosine similarity is <Y_pred,Y_true> / (||Y_pred||*||Y_true||).
 
-    Parameters
-    ----------
-    Y_pred, Y_true : broadcastable (n+2)D np.ndarray of shape (..., N=504, n_stocks=50)
-        DESCRIPTION.
+    Y_pred, Y_true : broadcastable (n+2)D np.ndarray of shape (..., N, n_stocks)
     """
     norm_pred = np.sqrt(np.sum(Y_pred**2, axis=-1))
     norm_true = np.sqrt(np.sum(Y_true**2, axis=-1))
@@ -197,76 +278,109 @@ def to_csv(vectors: np.ndarray, fname: str)-> None:
     data = np.concatenate([vectors, norms])
     data = np.stack([np.arange(len(data)), data], axis=1)
     
-    # data = np.empty((len(vectors)+len(norms), 2), dtype=float)
-    # data[:, 0] = np.arange(len(data))
-    # data[:len(vectors)] = vectors
-    
-    np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
-               header=',0', comments='')
-    
-
-def array_to_csv(vectors: np.ndarray, fname: str)-> None:
-    """
-    Export 2D array `vectors` to submittable csv format.
-    """
-    norms = np.sqrt(np.sum(vectors**2, axis=1))
-    vectors = (vectors / norms[:, np.newaxis]).ravel()
-    
-    data = np.concatenate([vectors, norms])
-    data = np.stack([np.arange(len(data)), data], axis=1)
-    
     np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
                header=',0', comments='')
 
 
-def vector_to_csv(vector: np.ndarray, fname: str)-> None:
+def vector_to_vectors(vector: np.ndarray, fname: str)-> np.ndarray:
     """
-    
+    Convert a single vector solution to the n_factors = 10 vectors for
+    submission.
     """
-    norms = vector[:10]
-    norms[-1] = np.sqrt(np.sum(vector[9:]**2))
-    
-    vectors = np.eye(10, 250, dtype=float)
-    vectors[-1, 9:] = vector[9:] / norms[-1]
-    
-    data = np.concatenate([vectors, norms])
-    data = np.stack([np.arange(len(data)), data], axis=1)
-    
-    np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
-               header=',0', comments='')
+    vectors = np.zeros(10, 250, dtype=float)
+    vectors[np.arange(9), np.arange(9)] = vector[:9]
+    vectors[-1, 9:] = vector[9:]
+    return vectors
 
 
-def metric_gradient(past_returns: np.ndarray,
-                    weights: np.ndarray,
-                    norm_tgt_returns: np.ndarray)-> np.ndarray:
+# =============================== Gradients ===================================
+
+def grad_metric(X: np.ndarray,
+                norm_Y: np.ndarray,
+                weights: np.ndarray,)-> np.ndarray:
     """
-    Compute the gradient of the metric.
+    Gradient of the cosine similarity metric evaluated at `weights`.
 
     Parameters
     ----------
-    past_returns : 3D np.ndarray of shape (N, n_stocks=50, depth=250)
-        DESCRIPTION.
+    X : 3D np.ndarray of shape (N, n_stocks=50, depth=250)
+        Past returns, the features.
+    norm_Y : 2D np.ndarray of shape (N, n_stocks=50)
+        Normalized target vectors.
     weights : 1D np.ndarray of shape (depth=250,)
-        DESCRIPTION.
-    norm_tgt_returns : 2D np.ndarray of shape (N, n_stocks=50)
-        DESCRIPTION.
+        Wzeights values at which the gradient is evaluated.
     """
-    pred_returns = np.sum(past_returns*weights, axis=-1)
-    pred_returns_norm = np.sqrt(np.sum(pred_returns**2, axis=1, keepdims=True))
+    Y_pred = np.sum(X*weights, axis=-1)
+    Y_pred_norm = np.sqrt(np.sum(Y_pred**2, axis=1, keepdims=True))
     
-    grad1 = np.sum(past_returns * norm_tgt_returns[..., None], axis=1)
-    grad1 = np.mean(grad1 / pred_returns_norm, axis=0)
+    grad1 = np.sum(X * norm_Y[..., None], axis=1)
+    grad1 = np.mean(grad1 / Y_pred_norm, axis=0)
     
-    proj = np.sum(pred_returns * norm_tgt_returns, axis=1, keepdims=True)
-    grad2 = np.sum(past_returns * pred_returns[..., None], axis=1)
-    grad2 = np.mean(grad2 * proj / pred_returns_norm**2, axis=0)
-    # print(pred_returns_norm.flatten())
+    proj = np.sum(Y_pred * norm_Y, axis=1, keepdims=True)
+    grad2 = np.sum(X * Y_pred[..., None], axis=1)
+    grad2 = np.mean(grad2 * proj / Y_pred_norm**2, axis=0)
         
     return grad1 - grad2
 
 
+def grad_l1_diff(weights: np.ndarray,
+                    penalty_factor: float,
+                    )-> np.ndarray:
+    """
+    Gradient of a L1 penalty: lambda * |w[i+1] - w[i]|.
+    """
+    diff_sign = np.diff(weights)
+    l1_grad = np.zeros_like(weights, dtype=float)
+    l1_grad[1:] = diff_sign
+    l1_grad[:-1] -= diff_sign
+    return penalty_factor*l1_grad
+
+
+def grad_l2_diff(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
+    """
+    Gradient of a L2 penalty: lambda * (w[i+1] - w[i])^2.
+    """
+    diff = np.diff(weights)
+    l2_grad = np.zeros_like(weights, dtype=float)
+    l2_grad[1:] = diff
+    l2_grad[:-1] -= diff
+    return 2*penalty_factor*l2_grad
+
+
+def grad_l1_absdiff(weights: np.ndarray,
+                    penalty_factor: float,
+                    )-> np.ndarray:
+    """
+    TODO
+    Gradient of a L1 difference-of-absolute-values penalty:
+        lambda * | |w[i+1]| - |w[i]| |.
+    """
+    diff_sign = np.diff(weights)
+    l1_grad = np.zeros_like(weights, dtype=float)
+    l1_grad[1:] = diff_sign
+    l1_grad[:-1] -= diff_sign
+    return penalty_factor*l1_grad
+
+
+def grad_l2_absdiff(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
+    """
+    TODO
+    Gradient of a L2 difference-of-absolute-values penalty:
+        lambda * ( |w[i+1]| - |w[i]| )^2.
+    """
+    diff = np.diff(weights)
+    l2_grad = np.zeros_like(weights, dtype=float)
+    l2_grad[1:] = diff
+    l2_grad[:-1] -= diff
+    return 2*penalty_factor*l2_grad
+
+
+# ============================= Weight fitting ================================
 
 class SGDOptimizer():
+    """
+    Custom implementation of a Nesterov stochastic gradient descent optimizer.
+    """
     
     def __init__(self,
                  weights: np.ndarray,
@@ -274,18 +388,19 @@ class SGDOptimizer():
                  momentum: float = 0.9,
                  nesterov: bool = False):
         """
-        TODO doc
-
         Parameters
         ----------
         weights : np.ndarray
             Initial weights.
         learning_rate : float, optional
-            DESCRIPTION. The default is 0.01.
+            Learning rate for momentum adjustment.
+            The default is 0.01.
         momentum : float, optional
-            DESCRIPTION. The default is 0.9.
+            The factor for momentum persistence across training steps.
+            The default is 0.9.
         nesterov : bool, optional
-            DESCRIPTION. The default is False.
+            Enable Nesterov accelerated gradient method.
+            The default is False.
         """
         self.learning_rate: float = learning_rate
         self.momentum: float = momentum
@@ -335,6 +450,16 @@ class SGDOptimizer():
         self.weights = w / np.sqrt(np.sum(w**2))
 
 
+def sgd_train():
+    # TODO
+    pass
+
+
+def sgd_validation():
+    # TODO
+    pass
+
+
 ##
 n_stocks = 50
 n_factors = 10
@@ -360,7 +485,17 @@ print(metric(Y_pred, Y))
 
 # %%
 """
-## A single vector
+## Regularized linear regression
+
+The simplest approach to find a predictor as a linear combination of
+past returns is to make a linear regression to find the corresponding weights.
+However, the model must be strongly regularized in order to avoid overfitting.
+Furthermore, the metric being invariant by a rescaling of the weights vectors (which is what ridge penalizes),
+we retain the lasso regularization for the regression.
+
+The targets only appear in the metric in normalized form, it is therefore natural
+to normalize the vector prior to training. In theory, the features should not be normalized
+(only the predicted vectors are normalized), however, it turns out that doing so improves the results.
 """
 
 ## normalize features and targets
@@ -398,32 +533,53 @@ for i, alpha in enumerate(alphas):
 # %%
 
 ## plot
-fig4, ax4 = plt.subplots(
+fig5, ax5 = plt.subplots(
     nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
     gridspec_kw={'left': 0.12, 'right': 0.92, 'top': 0.83, 'bottom': 0.14})
-fig4.suptitle("Figure 4: metric vs the regularization parameter",
-              x=0.02, ha='left')
+fig5.suptitle("Figure 4: Lasso regression results", x=0.02, ha='left')
 
 
-l_tr, = ax4.plot(alphas, tr_metric, linestyle='-', marker='')
-l_val, = ax4.plot(alphas, val_metric, linestyle='-', marker='')
-ax4.set_xscale('log')
-ax4.set_xlim(1e-6, 1e-3)
-ax4.set_xlabel('alpha')
-ax4.set_ylim(-0.02, 0.15)
-ax4.set_ylabel('Metric')
-ax4.grid(visible=True, linewidth=0.3)
-ax4.grid(visible=True, which='minor', linewidth=0.2)
+l_tr, = ax5.plot(alphas, tr_metric, linestyle='-', marker='')
+l_val, = ax5.plot(alphas, val_metric, linestyle='-', marker='')
+ax5.set_xscale('log')
+ax5.set_xlim(1e-6, 1e-3)
+ax5.set_xlabel('alpha')
+ax5.set_ylim(-0.02, 0.15)
+ax5.set_ylabel('Metric')
+ax5.grid(visible=True, linewidth=0.3)
+ax5.grid(visible=True, which='minor', linewidth=0.2)
 
-fig4.legend(handles=[l_tr, l_val],
+fig5.legend(handles=[l_tr, l_val],
             labels=['Training set', 'Validation set'],
             ncols=2, loc=(0.27, 0.84), alignment='center')
 
 plt.show()
 
+r"""
+The model performs poorly on the validation set for $\alpha < 10^{-4}$.
+However, the validation score increases past this threshold to reach about 0.025
+at $\alpha = 3 \cdot 10^{-4}$, which is similar to the benchmark score.
+Further increasing alpha yields a model with vanishing coefficients
+(hence a division by zero in the metric computation).
+However, the validation score actually depends strongly on the cross-validation splits.
 """
-We get a score of about 0.03 with alpha = 4e-4, this is similar to the benchmark.
-This score actually depends strongly on the cross-validation splits.
+
+# %%
+r"""
+### Model interpretation
+
+Let us study the weight vector found in the optimal case $\alpha = 3 \cdot 10^{-4}$.
+"""
+
+model = Lasso(alpha=3e-4, fit_intercept=False)
+model.fit(XX.reshape(-1, depth), YY.ravel())
+model.coef_
+
+
+"""
+The optimal weight vector found is very sparse! Only 19/250 coefficients are non-zero,
+and the actual values and positions appear random. We obtained a random sparse vector,
+which is quite unsatisfactory.
 """
 
 
@@ -431,7 +587,7 @@ This score actually depends strongly on the cross-validation splits.
 """
 ## Bruteforce v2
 
-Having reduced the problem, we can now apply the bruteforce approach much more efficiently.
+Having reduced the problem, we can now apply the bruteforce approach more efficiently.
 """
 
 rng = default_rng(1234)
@@ -461,13 +617,27 @@ All in all, this approach seems to have roughly the same efficiency as that of t
 What we gain in sampling speed we lose in optimization freedom.
 """
 
+# %%
+"""
+## Random projection
+
+
+
+"""
+
+# !!!
+
 
 # %% 
 """
 ## Gradient descent
 
+
+With these results, we implemented a Nesterov stochastic gradient descent algorithm
+(`SGDOptimizer` in `utils.py`) to find the optimal weights.
 """
-w0 = rng.normal(size=depth)
+
+w0 = rng.normal(size=depth) # best_vector
 w0 = w0 / np.sqrt(np.sum(w0**2)) 
 
 ## Set training parameters
@@ -476,7 +646,7 @@ batch_size = 16
 optimizer = SGDOptimizer(w0, learning_rate=0.05, momentum=0.0, nesterov=False)
 
 
-## Training metric
+## Compute training metric
 rng = default_rng(1234)
 idx = np.arange(len(X))
 tr_metric = np.zeros(n_epochs+1, dtype=float)
@@ -491,7 +661,7 @@ for i in range(n_epochs):
         X_ = X[idx[j*batch_size:(j+1)*batch_size]]
         Y_ = YY[idx[j*batch_size:(j+1)*batch_size]]
         w = optimizer.eval_point()
-        grad = -metric_gradient(X_, w, Y_)
+        grad = -grad_metric(X_, Y_, w)
         optimizer.apply_gradients(grad)
     
     Y_pred = np.sum(X * optimizer.weights, axis=-1)
@@ -502,7 +672,7 @@ for i in range(n_epochs):
     
 # %%
 
-## Validation metric
+## Compute validation metric
 rng = default_rng(1234)
 cv = KFold(n_splits=4, shuffle=True, random_state=1234)
 
@@ -519,7 +689,7 @@ for itr, ival in cv.split(X, YY):
             X_ = X[itr[j*batch_size:(j+1)*batch_size]]
             Y_ = YY[itr[j*batch_size:(j+1)*batch_size]]
             w = optimizer.eval_point()
-            grad = -metric_gradient(X_, w, Y_)
+            grad = -grad_metric(X_, Y_, w)
             optimizer.apply_gradients(grad)
         Y_pred[i, ival] = np.sum(X_v * optimizer.weights, axis=-1)
 val_metric[1:] = metric(Y_pred, Y)
@@ -550,7 +720,9 @@ fig5.legend(handles=[l_tr, l_val],
 plt.show()
 
 """
-The algorithm is clearly overfitting.
+The algorithm is clearly overfitting. The results are actually very similar to those
+of the unregulated linear regression. We did not gain anything by implementing the
+gradient descent.
 """
 
 # %%
@@ -567,35 +739,31 @@ for i in range(1, 8):
 
 
 # %%
+r"""
+## A different regularization
+
+When we consider the empirical factors $R_t^{(5)}$ and $R_{t-20}^{(230)}$ traditionally used,
+we note that these are mostly constant. It is also not hard to believe that a version of
+these factors with smoothed edges will perform equally well. Following this idea, we can require
+the weights that we are looking for to be *smooth* functions of the time. This can be enforced
+by penalizing the gradient $\nabla_t \mathbf{w}$. Concretely, we think of 4 penalty functions:
+- $J_2(\mathbf{w}) = \lambda \sum_{t=0}^{D-1} (w_{t+1} - w_t)^2$, the L2 penalty on the gradient,
+which corresponds to the kinetic term in field theories.
+- $J_1(\mathbf{w}) = \lambda \sum_{t=0}^{D-1} | w_{t+1} - w_t |$, the L1 penalty on the gradient.
+- $J_2^{\mathrm{abs}}(\mathbf{w}) = \lambda \sum_{t=0}^{D-1} (|w_{t+1}| - |w_t|)^2$,
+the L2 penalty on the difference between absolute values. The rationale behind this penalty is
+that we do not want to penalize factors that correspond to alternating returns ($+-+-+-+-$),
+but still enfore a smooth envelope.
+- $J_1^{\mathrm{abs}}(\mathbf{w}) = \lambda \sum_{t=0}^{D-1} |\, |w_{t+1}| - |w_t| \, |$, the L1 variant.
+
+Fortunately, the algorithm that we implemented above offers enough flexibility to add
+and implement these kind of regularization functions. Routines to evaluate their
+gradient can be found in the `utils` module.
 """
-## Add a regularity constraint
+
+# !!!
 
 
-"""
-
-
-def grad_l1_penalty(weights: np.ndarray,
-                    penalty_factor: float,
-                    )-> np.ndarray:
-    """
-    Compute the gradient of a L1 penalty: lambda * |w[i+1] - w[i]|.
-    """
-    diff_sign = np.diff(weights)
-    l1_grad = np.zeros_like(weights, dtype=float)
-    l1_grad[1:] = diff_sign
-    l1_grad[:-1] -= diff_sign
-    return penalty_factor*l1_grad
-
-
-def grad_l2_penalty(weights: np.ndarray, penalty_factor: float)-> np.ndarray:
-    """
-    Compute the gradient of a L2 penalty: lambda * (w[i+1] - w[i])^2.
-    """
-    diff = np.diff(weights)
-    l2_grad = np.zeros_like(weights, dtype=float)
-    l2_grad[1:] = diff
-    l2_grad[:-1] -= diff
-    return 2*penalty_factor*l2_grad
 
 
 # %%
@@ -625,7 +793,7 @@ for i in range(n_epochs):
         X_ = X[idx[j*batch_size:(j+1)*batch_size]]
         Y_ = YY[idx[j*batch_size:(j+1)*batch_size]]
         w = optimizer.eval_point()
-        grad = -metric_gradient(X_, w, Y_) + grad_l1_penalty(w, reg_param)
+        grad = -grad_metric(X_,Y_, w) + grad_l1_diff(w, reg_param)
         optimizer.apply_gradients(grad)
     
     Y_pred = np.sum(X * optimizer.weights, axis=-1)
@@ -653,7 +821,7 @@ for itr, ival in cv.split(X, YY):
             X_ = X[itr[j*batch_size:(j+1)*batch_size]]
             Y_ = YY[itr[j*batch_size:(j+1)*batch_size]]
             w = optimizer.eval_point()
-            grad = -metric_gradient(X_, w, Y_) + grad_l1_penalty(w, reg_param)
+            grad = -grad_metric(X_, Y_, w) + grad_l1_diff(w, reg_param)
             optimizer.apply_gradients(grad)
         Y_pred[i, ival] = np.sum(X_v * optimizer.weights, axis=-1)
 val_metric[1:] = metric(Y_pred, Y)
@@ -683,3 +851,8 @@ fig5.legend(handles=[l_tr, l_val],
 
 plt.show()
 
+
+
+# %%
+
+from utils import to_csv
