@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Noice
+Python script version of the stock market prediction challenge.
 """
 
 import time
@@ -11,31 +11,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numpy.random import default_rng
 
-from sklearn.base import clone
-from sklearn.compose import ColumnTransformer
-from sklearn.metrics import (mean_squared_error,
-                             r2_score,
-                             mean_absolute_error,
-                             mean_absolute_percentage_error)
-from sklearn.model_selection import train_test_split, KFold
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import (OneHotEncoder,
-                                   StandardScaler,
-                                   FunctionTransformer)
-from sklearn.linear_model import LinearRegression, Lasso, Ridge
-from sklearn.ensemble import AdaBoostRegressor, BaggingRegressor
+from sklearn.model_selection import KFold
+from sklearn.linear_model import Lasso
 
 
-# =============================================================================
-# 
-# =============================================================================
-
+###############################################################################
 # %% Data loading and preprocessing
 
 stock_returns = np.loadtxt('./X_train.csv', delimiter=',', skiprows=1)[:, 1:]
-# Y = np.loadtxt('./Y_train_wz11VM6.csv', delimiter=',', skiprows=1)
 
-X = stock_returns
 
 
 # %% EDA
@@ -217,10 +201,9 @@ which by construction must be insensitive to inter-day variations.
 
 fig4, ax4 = plt.subplots(
     nrows=1, ncols=1, figsize=(7, 6.4), dpi=100,
-    gridspec_kw={'left': 0.03, 'right': 0.88, 'top': 0.89, 'bottom': 0.03, 'wspace': 0.24})
+    gridspec_kw={'left': 0.03, 'right': 0.88, 'top': 0.89, 'bottom': 0.03})
 cax4 = fig4.add_axes((0.89, 0.06, 0.025, 0.8))
 fig4.suptitle("Figure 4: Price returns correlation", x=0.02, ha='left')
-
 
 ax4.set_aspect('equal')
 cmap4 = plt.get_cmap('seismic').copy()
@@ -232,10 +215,6 @@ heatmap = ax4.pcolormesh(100*np.corrcoef(stock_returns)[::-1],
 ax4.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
 ax4.set_xticks([0.5, 9.5, 19.5, 29.5, 39.5, 49.5], [1, 10, 20, 30, 40, 50])
 ax4.set_yticks([49.5, 39.5, 29.5, 19.5, 9.5, 0.5], [1, 10, 20, 30, 40, 50])
-
-
-pos = ax4.get_position().bounds
-x, y = pos[0], pos[1] + pos[3]
 
 fig4.colorbar(heatmap, cax=cax4, orientation="vertical", ticklocation="right")
 cax4.text(1.4, 1.03, 'Corr.\ncoef. (%)', fontsize=11, ha='center', transform=cax4.transAxes)
@@ -270,26 +249,27 @@ def metric(Y_pred: np.ndarray, Y_true: np.ndarray)-> float:
     return np.mean(scalar_product/(norm_true*norm_pred), axis=-1)
 
 
-def to_csv(vectors: np.ndarray, fname: str)-> None:
+def to_csv(vectors: np.ndarray, fname: str)-> np.ndarray:
     """
     Export 2D array `vectors` to submittable csv format.
     """
     norms = np.sqrt(np.sum(vectors**2, axis=1))
-    vectors = (vectors / norms[:, np.newaxis]).ravel()
-    
+    vectors = (vectors / norms[:, np.newaxis]).T.ravel()
+
     data = np.concatenate([vectors, norms])
     data = np.stack([np.arange(len(data)), data], axis=1)
-    
+
     np.savetxt(fname, data, fmt=['%.0f', '%.18e'], delimiter=',',
                header=',0', comments='')
+    return data
 
 
-def vector_to_vectors(vector: np.ndarray, fname: str)-> np.ndarray:
+def vector_to_vectors(vector: np.ndarray)-> np.ndarray:
     """
     Convert a single vector solution to the n_factors = 10 vectors for
     submission.
     """
-    vectors = np.zeros(10, 250, dtype=float)
+    vectors = np.zeros((10, 250), dtype=float)
     vectors[np.arange(9), np.arange(9)] = vector[:9]
     vectors[-1, 9:] = vector[9:]
     return vectors
@@ -312,17 +292,17 @@ def grad_metric(X: np.ndarray,
     weights : 1D np.ndarray of shape (depth=250,)
         Wzeights values at which the gradient is evaluated.
     """
-    Y_pred = np.sum(X*weights, axis=-1)
+    Y_pred = X @ weights
     Y_pred_norm = np.sqrt(np.sum(Y_pred**2, axis=1, keepdims=True))
     Y_pred_norm = np.where(Y_pred_norm==0, 1, Y_pred_norm)
-    
+
     grad1 = np.sum(X * norm_Y[..., None], axis=1)
     grad1 = np.mean(grad1 / Y_pred_norm, axis=0)
-    
+
     proj = np.sum(Y_pred * norm_Y, axis=1, keepdims=True)
     grad2 = np.sum(X * Y_pred[..., None], axis=1)
     grad2 = np.mean(grad2 * proj / Y_pred_norm**2, axis=0)
-        
+
     return grad1 - grad2
 
 
@@ -384,7 +364,7 @@ class SGDOptimizer():
     """
     Custom implementation of a Nesterov stochastic gradient descent optimizer.
     """
-    
+
     def __init__(self,
                  weights: np.ndarray,
                  learning_rate: float = 0.01,
@@ -408,29 +388,29 @@ class SGDOptimizer():
         self.learning_rate: float = learning_rate
         self.momentum: float = momentum
         self.nesterov: bool = nesterov
-        
+
         self.weights = weights
         self.momentum_vector = np.zeros_like(weights)
-    
-    
+
+
     def reset(self, new_weights: np.ndarray)-> None:
         """
         Reset the optimizer with new weights, and set the momentum to zero.
         """
         self.weights = new_weights
         self.momentum_vector = np.zeros_like(self.weights)
-    
-    
+
+
     def eval_point(self,)-> np.ndarray:
         """
-        Return the evaluation point 
+        Return the evaluation point
         """
         if self.nesterov:
             return self.weights + self.momentum * self.momentum_vector
         else:
             return self.weights
-    
-    
+
+
     def apply_gradients(self, gradients: np.ndarray):
         """
         Update the momentum and weights.
@@ -441,14 +421,14 @@ class SGDOptimizer():
         2. m <- m - <m,w> * w
         3. w <- w + m
         4. w <- w / ||w||
-        
+
         `gradients` must be 1D np.ndarray of the same shape as the weights.
         """
         m = (self.momentum * self.momentum_vector
              - self.learning_rate * gradients)
         m = m - np.sum(m*self.weights) * self.weights
         self.momentum_vector = m
-        
+
         w = self.weights + self.momentum_vector
         w_norm = np.sqrt(np.sum(w**2))
         self.weights = w / w_norm if w_norm > 0 else w
@@ -516,16 +496,16 @@ def sgd_train(X: np.ndarray,
     """
     rng = default_rng(random_state)
     idx = np.arange(len(X))
-    
+
     best_weights = optimizer.weights
     best_metric = metric(np.sum(X * optimizer.weights, axis=-1), norm_Y)
     best_epoch = 0
     last_metric = best_metric
     last_epoch = 0
-    
+
     for epoch in range(n_epochs):
         rng.shuffle(idx)
-        
+
         # epoch train
         for j in range((len(idx)+batch_size-1) // batch_size):
             X_ = X[idx[j*batch_size:(j+1)*batch_size]]
@@ -539,7 +519,7 @@ def sgd_train(X: np.ndarray,
             best_weights = optimizer.weights
             best_metric = curr_metric
             best_epoch = epoch
-        
+
         # early stopping
         if early_stopping:
             if curr_metric > last_metric + early_stop_min_delta:
@@ -547,10 +527,10 @@ def sgd_train(X: np.ndarray,
                 last_epoch = epoch
             elif epoch - last_epoch > early_stop_patience:
                 break
-        
+
         if verbose:
             print(f'epoch {epoch+1}/{n_epochs} : metric {curr_metric:.4f}')
-    
+
     if return_best_weights:
         return best_weights, best_metric, best_epoch
     else:
@@ -634,24 +614,24 @@ def sgd_cv_eval(X: np.ndarray,
     best_epoch = 0
     last_metric = best_metric
     last_epoch = 0
-    
+
     for epoch in range(n_epochs):
-        
+
         # epoch train for all CV splits
         for i, (itr, ival) in enumerate(idx):
             optim = optimizers[i]
             X_v = X[ival]
             rng.shuffle(itr)
-            
+
             for j in range((len(itr)+batch_size-1) // batch_size):
                 X_ = X[itr[j*batch_size:(j+1)*batch_size]]
                 Y_ = norm_Y[itr[j*batch_size:(j+1)*batch_size]]
                 w = optim.eval_point()
                 optim.apply_gradients(gradient_func(X_,Y_, w))
-            
+
             Y_pred_val[ival] = np.sum(X_v * optim.weights, axis=-1)
 
-        # update best metric        
+        # update best metric
         curr_metric = metric(Y_pred_val, norm_Y)
         if return_best_weights and (curr_metric > best_metric):
             best_weights = [opt.weights for opt in optimizers]
@@ -665,19 +645,19 @@ def sgd_cv_eval(X: np.ndarray,
                 last_epoch = epoch
             elif epoch - last_epoch > early_stop_patience:
                 break
-        
+
         if verbose:
             print(f'epoch {epoch+1}/{n_epochs} : metric {curr_metric:.4f}')
-    
+
     if return_best_weights:
         # compute trainig metric
         Y_pred_tr = np.concatenate([np.sum(X[itr] * w, axis=-1)
                                     for (itr, _), w in zip(idx, best_weights)])
         Y_tr = np.concatenate([norm_Y[itr] for (itr, _) in idx])
         tr_metric = metric(Y_pred_tr, Y_tr)
-        
+
         return np.array(best_weights), tr_metric, best_metric, best_epoch
-    
+
     else:
         last_weights = np.array([opt.weights for opt in optimizers])
         # compute trainig metric
@@ -685,7 +665,7 @@ def sgd_cv_eval(X: np.ndarray,
                                     for (itr, _), w in zip(idx, last_weights)])
         Y_tr = np.concatenate([norm_Y[itr] for (itr, _) in idx])
         tr_metric = metric(Y_pred_tr, Y_tr)
-        
+
         return last_weights, tr_metric, curr_metric, epoch
 
 
@@ -707,7 +687,7 @@ a = np.zeros(250, dtype=float)
 a[0:5] = -0.00694934/np.sqrt(5)
 a[20:250] = 0.01560642/np.sqrt(230)
 
-Y_pred = np.sum(X*a[::-1], axis=-1)
+Y_pred = X @ a[::-1]
 print(metric(Y_pred, Y))
 
 
@@ -763,7 +743,7 @@ for i, alpha in enumerate(alphas):
 ## plot
 fig5, ax5 = plt.subplots(
     nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
-    gridspec_kw={'left': 0.12, 'right': 0.92, 'top': 0.83, 'bottom': 0.14})
+    gridspec_kw={'left': 0.14, 'right': 0.93, 'top': 0.83, 'bottom': 0.14})
 fig5.suptitle("Figure 5: Lasso regression results", x=0.02, ha='left')
 
 
@@ -786,7 +766,7 @@ plt.show()
 r"""
 The model performs poorly on the validation set for $\alpha < 10^{-4}$.
 However, the validation score increases past this threshold to reach about 0.025
-at $\alpha = 3 \cdot 10^{-4}$, which is similar to the benchmark score.
+at $\alpha = 2.5 \cdot 10^{-4}$, which is similar to the benchmark score.
 Further increasing alpha yields a model with vanishing coefficients
 (hence a division by zero in the metric computation).
 However, the validation score actually depends strongly on the cross-validation splits.
@@ -827,7 +807,7 @@ for i in range(niter):
     vectors = rng.normal(size=(10000, depth))
     Y_pred = np.tensordot(vectors, X, [[1], [2]])
     res = metric(Y_pred, Y)
-    
+
     best_idx = np.argmax(res)
     if res[best_idx] > best_metric:
         best_metric = res[best_idx]
@@ -846,7 +826,7 @@ What we gain in sampling speed we lose in optimization freedom.
 """
 
 
-# %% 
+# %%
 """
 ## Gradient descent
 
@@ -856,7 +836,7 @@ With these results, we implemented a Nesterov stochastic gradient descent algori
 """
 
 w0 = rng.normal(size=depth) # best_vector
-w0 = w0 / np.sqrt(np.sum(w0**2)) 
+w0 = w0 / np.sqrt(np.sum(w0**2))
 
 ## Set training parameters
 n_epochs = 60
@@ -869,7 +849,7 @@ rng = default_rng(1234)
 idx = np.arange(len(X))
 tr_metric = np.zeros(n_epochs+1, dtype=float)
 
-Y_pred = np.sum(X * w0, axis=-1)
+Y_pred = X @ w0
 tr_metric[0] = metric(Y_pred, Y)
 print(f'epoch 0/{n_epochs} : train metric {tr_metric[0]:.4f}')
 
@@ -881,13 +861,13 @@ for i in range(n_epochs):
         w = optimizer.eval_point()
         grad = -grad_metric(X_, Y_, w)
         optimizer.apply_gradients(grad)
-    
-    Y_pred = np.sum(X * optimizer.weights, axis=-1)
+
+    Y_pred = X @ optimizer.weights
     tr_metric[i+1] = metric(Y_pred, Y)
     if i % 10 == 9:
         print(f'epoch {i+1}/{n_epochs} : train metric {tr_metric[i]:.4f}')
-        
-    
+
+
 # %%
 
 ## Compute validation metric
@@ -981,24 +961,25 @@ gradient can be found in the `utils` module.
 ### Finding optimal parameters
 """
 
+## Initial weights
 rng = default_rng(1234)
 w0 = rng.normal(size=depth)
 w0 = w0 / np.sqrt(np.sum(w0**2))
 
+## Grid search
 grad_regs = [grad_l1_diff , grad_l2_diff, grad_l1_absdiff, grad_l2_absdiff]
 reg_param_vals = np.logspace(-3, 4, 28)
 
-sgdreg_tr_metric = np.zeros((4, len(reg_param_vals)), dtype=float)
-sgdreg_val_metric = np.zeros((4, len(reg_param_vals)), dtype=float)
-
+sgdreg_tr_scores = np.zeros((4, len(reg_param_vals)), dtype=float)
+sgdreg_val_scores = np.zeros((4, len(reg_param_vals)), dtype=float)
 for i, grad_reg in enumerate(grad_regs):
     t0 = time.time()
     for j, reg in enumerate(reg_param_vals):
-        print(f'{grad_reg.__name__} ; regularization parameter: {reg:.4f}')
+        # print(f'{grad_reg.__name__} ; regularization parameter: {reg:.4f}')
         optim = SGDOptimizer(w0, learning_rate=0.005, momentum=0.9, nesterov=True)
         grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_reg(w, reg)
-        
-        
+
+
         _, tr_metric, val_metric, _ = sgd_cv_eval(X, YY, deepcopy(optim),
                                                   grad_func,
                                                   batch_size=16,
@@ -1010,9 +991,9 @@ for i, grad_reg in enumerate(grad_regs):
                                                   early_stop_min_delta=5e-4,
                                                   return_best_weights=True,
                                                   verbose=False)
-        
-        sgdreg_val_metric[i, j] = val_metric
-        sgdreg_tr_metric[i, j] = tr_metric
+
+        sgdreg_val_scores[i, j] = val_metric
+        sgdreg_tr_scores[i, j] = tr_metric
     t1 = time.time()
     print(f'{grad_reg.__name__} : {len(reg_param_vals)} fits in {t1-t0:.2f} s')
 
@@ -1020,16 +1001,15 @@ for i, grad_reg in enumerate(grad_regs):
 # %%
 
 fig7, axs7 = plt.subplots(
-    nrows=2, ncols=2, sharex=True, sharey=True, figsize=(9, 6), dpi=100,
-    gridspec_kw={'left': 0.08, 'right': 0.94, 'top': 0.86, 'bottom': 0.1,
+    nrows=2, ncols=2, sharex=True, sharey=True, figsize=(8, 5.8), dpi=100,
+    gridspec_kw={'left': 0.085, 'right': 0.93, 'top': 0.86, 'bottom': 0.1,
                  'hspace': 0.1, 'wspace': 0.1})
-fig7.suptitle("Figure 7: nice", x=0.02, ha='left')
-# !!!
+fig7.suptitle("Figure 7: Regularized SGD scores", x=0.02, ha='left')
 
 # L1 penalty
-l_tr, = axs7[0, 0].plot(reg_param_vals, sgdreg_tr_metric[0],
+l_tr, = axs7[0, 0].plot(reg_param_vals, sgdreg_tr_scores[0],
                         linestyle='-', marker='')
-l_val, = axs7[0, 0].plot(reg_param_vals, sgdreg_val_metric[0],
+l_val, = axs7[0, 0].plot(reg_param_vals, sgdreg_val_scores[0],
                          linestyle='-', marker='')
 axs7[0, 0].tick_params(which='both', direction='in',
                        right=True, labelbottom=False,
@@ -1044,9 +1024,9 @@ axs7[0, 0].text(0.96, 0.93, r'$\lambda \sum_{t=0}^{D-1} |w_{t+1} - w_t|$',
                 bbox={'boxstyle': 'round', 'facecolor': '0.94'})
 
 # L2 penalty
-l_tr, = axs7[0, 1].plot(reg_param_vals, sgdreg_tr_metric[1],
+l_tr, = axs7[0, 1].plot(reg_param_vals, sgdreg_tr_scores[1],
                         linestyle='-', marker='')
-l_val, = axs7[0, 1].plot(reg_param_vals, sgdreg_val_metric[1],
+l_val, = axs7[0, 1].plot(reg_param_vals, sgdreg_val_scores[1],
                          linestyle='-', marker='')
 axs7[0, 1].tick_params(which='both', direction='in',
                        labelleft=False, labelbottom=False,
@@ -1060,9 +1040,9 @@ axs7[0, 1].text(0.96, 0.93, r'$\lambda \sum_{t=0}^{D-1} (w_{t+1} - w_t)^2$',
                 bbox={'boxstyle': 'round', 'facecolor': '0.94'})
 
 # L1 penalty on diff of abs
-l_tr, = axs7[1, 0].plot(reg_param_vals, sgdreg_tr_metric[2],
+l_tr, = axs7[1, 0].plot(reg_param_vals, sgdreg_tr_scores[2],
                         linestyle='-', marker='')
-l_val, = axs7[1, 0].plot(reg_param_vals, sgdreg_val_metric[2],
+l_val, = axs7[1, 0].plot(reg_param_vals, sgdreg_val_scores[2],
                          linestyle='-', marker='')
 axs7[1, 0].tick_params(which='both', direction='in',
                        right=True, top=True)
@@ -1074,9 +1054,9 @@ axs7[1, 0].text(0.96, 0.93, r'$\lambda \sum_{t=0}^{D-1} ||w_{t+1}| - |w_t||$',
                 bbox={'boxstyle': 'round', 'facecolor': '0.94'})
 
 # L2 penalty on diff of abs
-l_tr, = axs7[1, 1].plot(reg_param_vals, sgdreg_tr_metric[3],
+l_tr, = axs7[1, 1].plot(reg_param_vals, sgdreg_tr_scores[3],
                         linestyle='-', marker='')
-l_val, = axs7[1, 1].plot(reg_param_vals, sgdreg_val_metric[3],
+l_val, = axs7[1, 1].plot(reg_param_vals, sgdreg_val_scores[3],
                          linestyle='-', marker='')
 axs7[1, 1].tick_params(which='both', direction='in',
                        top=True,
@@ -1090,13 +1070,13 @@ axs7[1, 1].text(0.96, 0.93, r'$\lambda \sum_{t=0}^{D-1} (|w_{t+1}| - |w_t|)^2$',
                 bbox={'boxstyle': 'round', 'facecolor': '0.94'})
 
 
-fig7.text(0.53, 0.025, 'Regularization parameter', fontsize=11,
+fig7.text(0.51, 0.025, 'Regularization parameter', fontsize=11,
           ha='center', va='center')
-fig7.text(0.025, 0.5, 'Metric', fontsize=11, rotation=90,
+fig7.text(0.02, 0.48, 'Metric', fontsize=11, rotation=90,
           ha='center', va='center')
 fig7.legend(handles=[l_tr, l_val],
             labels=['Training metric', 'Validation metric'],
-            ncols=2, loc=(0.493, 0.93), fontsize=11)
+            ncols=2, loc=(0.465, 0.92), fontsize=11)
 
 plt.show()
 
@@ -1112,174 +1092,235 @@ corresponding penalty gradient being continuous, contrary to the other penalty f
 # %%
 
 """
-!!!
-
-### Convergence ???
-
-We now study the convergence of our models. More precisely, we try to determine
-the influence of the initial weights on the optimum found by the algorithm.
-We also question whether models with different penalties but the same initial weights
-will converge to the same optimum
+### Convergence of the regularized SGD
 
 Despite the not-so-good performance of our models, if they converge to different
-weights for different initial conditions/penalty functions, we can construct a more
-powerful predictor by combining them.
+weights for different initial conditions/penalty functions, we can expect to make
+a more powerful predictor by combining them.
+
+With this in mind, we study in this section the convergence of our models.
+More precisely, we try to determine the influence of the initial weights on
+the optimum found by the algorithm.
+We also question whether models with different penalties but the same initial weights
+will converge to the same values.
+
+To do so, we repeatedly fit the models with 10 different inital weight vectors
+and record the optimum weights reached by the model. We then study the correlation
+between all these vectors.
 """
 
-##
+## Initialize random weight vectors
+n_vect = 10
 rng = default_rng(1234)
-w0 = rng.normal(size=(5, depth))
+w0 = rng.normal(size=(n_vect, depth))
 init_weights = w0 / np.sqrt(np.sum(w0**2, axis=1, keepdims=True))
 
-grad_regs = [grad_l1_diff , grad_l2_diff, grad_l1_absdiff, grad_l2_absdiff]
 
-## set based on figure 7
-reg_param_vals = [8, 70, 5, 50]
+## parameters chosen based on figure 7
+best_reg_params = [5, 5, 10, 10]
 
+## Find optimal weights for each initial weight and model combination
+opt_weights = np.empty((4, n_vect, depth))
+tr_scores = np.empty((4, n_vect))
+for i, (grad_reg, reg) in enumerate(zip(grad_regs, best_reg_params)):
+    # print(f'{grad_reg.__name__} ; regularization parameter: {reg:.4f}')
+    grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_reg(w, reg)
 
-
-##
-opt_weights = np.empty((4, 5, depth))
-for i, wt in enumerate(init_weights):
-    for j, (grad_reg, reg) in enumerate(zip(grad_regs, reg_param_vals)):
-        print(f'{grad_reg.__name__} ; regularization parameter: {reg:.4f}')
+    for j, wt in enumerate(init_weights):
         optim = SGDOptimizer(wt, learning_rate=0.005, momentum=0.9, nesterov=True)
-        grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_reg(w, reg)
-
-        opt_wt, _, _ = sgd_train(X, YY, optim, grad_func,
+        opt_wt, tr_metric, _ = sgd_train(X, YY, optim, grad_func,
                                  batch_size=16,
-                                 n_epochs=200,
+                                 n_epochs=400,
                                  random_state=1234,
                                  early_stopping=True,
-                                 early_stop_patience=20,
+                                 early_stop_patience=40,
                                  early_stop_min_delta=5e-4,
                                  return_best_weights=True,
                                  verbose=False)
 
         opt_weights[i, j] = opt_wt
-
-# %%
-
-
-
-
+        tr_scores[i, j] = tr_metric
 
 
 # %%
 
-_, tr_metric, epoch = sgd_train(X, YY, optim, grad_func,
-                                  batch_size=16,
-                                  n_epochs=400,
-                                  random_state=1234,
-                                  early_stopping=True,
-                                  early_stop_patience=20,
-                                  early_stop_min_delta=5e-4,
-                                  return_best_weights=True,
-                                  verbose=False)
-
-
-
-rng = default_rng(1234)
-w0 = rng.normal(size=depth)
-w0 = w0 / np.sqrt(np.sum(w0**2))
-
-optimizer = SGDOptimizer(w0, learning_rate=0.005, momentum=0.9, nesterov=False)
-grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_l1_diff(w, 1)
-
-w, best_metric, epoch = sgd_cv_eval(X, YY,
-                                    optimizer,
-                                    grad_func,
-                                    batch_size=16,
-                                    n_epochs=400,
-                                    random_state=1234,
-                                    cv_splits=4,
-                                    early_stopping=True,
-                                    early_stop_patience=20,
-                                    early_stop_min_delta=5e-4,
-                                    restore_best_weights=True,
-                                    verbose=False)
-
-
-# %%
-
-
-## Set training parameters
-n_epochs = 100
-batch_size = 16
-reg_param = 10
-optimizer = SGDOptimizer(w0, learning_rate=0.01, momentum=0.8, nesterov=True)
-
-
-## Training metric
-rng = default_rng(1234)
-idx = np.arange(len(X))
-tr_metric = np.zeros(n_epochs+1, dtype=float)
-
-Y_pred = np.sum(X * w0, axis=-1)
-tr_metric[0] = metric(Y_pred, Y)
-print(f'epoch 0/{n_epochs} : train metric {tr_metric[0]:.4f}')
-
-for i in range(n_epochs):
-    rng.shuffle(idx)
-    for j in range((len(idx)+batch_size-1) // batch_size):
-        X_ = X[idx[j*batch_size:(j+1)*batch_size]]
-        Y_ = YY[idx[j*batch_size:(j+1)*batch_size]]
-        w = optimizer.eval_point()
-        grad = -grad_metric(X_,Y_, w) + grad_l1_diff(w, reg_param)
-        optimizer.apply_gradients(grad)
-    
-    Y_pred = np.sum(X * optimizer.weights, axis=-1)
-    tr_metric[i+1] = metric(Y_pred, Y)
-    if i % 10 == 9:
-        print(f'epoch {i+1}/{n_epochs} : train metric {tr_metric[i]:.4f}')
-        
-    
-# %%
-
-## Validation metric
-rng = default_rng(1234)
-cv = KFold(n_splits=4, shuffle=True, random_state=1234)
-
-val_metric = np.zeros(n_epochs+1, dtype=float)
-val_metric[0] = tr_metric[0]
-Y_pred = np.zeros((n_epochs,) + Y.shape, dtype=float)
-
-for itr, ival in cv.split(X, YY):
-    optimizer.reset(w0)
-    X_v = X[ival]
-    for i in range(n_epochs):
-        rng.shuffle(itr)
-        for j in range((len(itr)+batch_size-1) // batch_size):
-            X_ = X[itr[j*batch_size:(j+1)*batch_size]]
-            Y_ = YY[itr[j*batch_size:(j+1)*batch_size]]
-            w = optimizer.eval_point()
-            grad = -grad_metric(X_, Y_, w) + grad_l1_diff(w, reg_param)
-            optimizer.apply_gradients(grad)
-        Y_pred[i, ival] = np.sum(X_v * optimizer.weights, axis=-1)
-val_metric[1:] = metric(Y_pred, Y)
-
-
-# %%
-## plot
-fig5, ax5 = plt.subplots(
-    nrows=1, ncols=1, sharey=True, figsize=(5.8, 3.8), dpi=100,
-    gridspec_kw={'left': 0.125, 'right': 0.94, 'top': 0.83, 'bottom': 0.14})
-fig5.suptitle("Figure 5: Metric evolution with SGD training",
+fig8, axs8 = plt.subplots(
+    nrows=5, ncols=1, sharex=True, sharey=True, figsize=(12, 4.5), dpi=100,
+    gridspec_kw={'left': 0.01, 'right': 0.99, 'top': 0.9, 'bottom': 0.02,
+                 'hspace': 0.4, 'wspace': 0.1})
+fig8.suptitle("Figure 8: Heatmap representation of the weights",
               x=0.02, ha='left')
 
+axs8[0].annotate('', (0.93, 0.92), (0.83, 0.92), xycoords='figure fraction',
+                 arrowprops={'arrowstyle': '->', 'facecolor': 'k', 'linewidth': 2})
+fig8.text(0.88, 0.94, 'time', fontsize=11)
 
-l_tr, = ax5.plot(np.arange(n_epochs+1), tr_metric, linestyle='-', marker='')
-l_val, = ax5.plot(np.arange(n_epochs+1), val_metric, linestyle='-', marker='')
+axs8[0].imshow(init_weights, cmap='seismic', vmin=-0.4, vmax=0.4)
+axs8[0].set_title('Initial vectors')
+axs8[0].tick_params(left=False, labelleft=False,
+                    bottom=False, labelbottom=False)
 
-ax5.set_xlim(0, n_epochs)
-ax5.set_xlabel('epoch')
-ax5.set_ylim(-0.01, 0.16)
-ax5.set_ylabel('Metric')
-ax5.grid(visible=True, linewidth=0.3)
-
-fig5.legend(handles=[l_tr, l_val],
-            labels=['Training set', 'Validation set'],
-            ncols=2, loc=(0.27, 0.84), alignment='center')
+titles = ['L1_diff', 'L2_diff', 'L1_absdiff', 'L2_absdiff']
+for i, w in enumerate(opt_weights, start=1):
+    axs8[i].imshow(w, cmap='seismic', vmin=-0.4, vmax=0.4)
+    axs8[i].set_title(rf'{titles[i-1]}, $\lambda = {best_reg_params[i-1]}$')
+    axs8[i].tick_params(bottom=False, labelbottom=False,
+                        left=False, labelleft=False)
 
 plt.show()
+
+"""
+Figure 8 presents a heatmap representation of the initial weights as well as the
+optimum weights found by each model. Note that the coefficients taking into
+account more recent times are on the right.
+- For the models using regular L1 and L2 penalties $J_1(\mathbf{w})$ and $J_2(\mathbf{w})$,
+the regularity and homogeneity of the final weights is striking. these models clearly converge
+towards the same optimum independently of the initial weights.
+It is interesting to note that this optimum seems to give more importance
+to the values far preceding than to the returns of the past days.
+The returns of the same period during the previous year are possibly goods indicators
+of the current returns.
+- For models using using the penalties acting the absolute values of the weights,
+$J^{\mathrm{abs}}_1(\mathbf{w})$ and $J^{\mathrm{abs}}_2(\mathbf{w})$, the
+final weights also present a form of regularity. However, the optimum depends
+strongly on the initial weight values.
+Actually, the optimal weights seems to be chosen at random among some specific
+(non-gaussian) distribution.
+"""
+
+# %%
+
+##
+weights = np.concatenate([init_weights[None, ...], opt_weights], axis=0)
+weights_corr = 100*np.corrcoef(weights.reshape(-1, depth))[::-1]
+
+##
+fig9, ax9 = plt.subplots(
+    nrows=1, ncols=1, figsize=(8, 7.4), dpi=100,
+    gridspec_kw={'left': 0.03, 'right': 0.88, 'top': 0.89, 'bottom': 0.03})
+cax9 = fig9.add_axes((0.89, 0.06, 0.025, 0.8))
+fig9.suptitle("Figure 9: Correlation matrix of the weight vectors",
+              x=0.02, ha='left')
+
+ax9.set_aspect('equal')
+cmap9 = plt.get_cmap('seismic').copy()
+cmap9.set_extremes(under='0.9', over='0.5')
+heatmap = ax9.pcolormesh(weights_corr,
+                         cmap=cmap9, vmin=-100, vmax=100,
+                         edgecolors='0.2', linewidth=0.5)
+
+ax9.tick_params(top=False, labeltop=False, bottom=False, labelbottom=False,
+                left=False, labelleft=False)
+for i in range(6):
+    ax9.plot(ax9.get_xlim(), [i*n_vect, i*n_vect],
+             color='k', lw=2, clip_on=False)
+for i in range(6):
+    ax9.plot([i*n_vect, i*n_vect], ax9.get_ylim(),
+             color='k', lw=2, clip_on=False)
+
+txt = ['Initial\nvectors', 'L1_diff', 'L2_diff', 'L1_absdiff', 'L2_absdiff']
+for i, t in enumerate(txt):
+    ax9.text(i*0.2+0.1, 1.02, t, transform=ax9.transAxes, ha='center')
+
+
+fig9.colorbar(heatmap, cax=cax9, orientation="vertical", ticklocation="right")
+cax9.text(1.4, 1.03, 'Corr.\ncoef. (%)', fontsize=11, ha='center', transform=cax9.transAxes)
+
+
+plt.show()
+
+r"""
+Figure 9 shows the correlation matrix of all the weight vectors, initial and
+optimized by the models. The thick solid black lines split the matrix in blocks
+corresponding to the different models.
+
+The initial weight vectors are uncorrelated, both with
+each other and with the model solutions, as expected. However, there is a qualitative
+difference between the vectors found by the different models:
+- The good convergence of the models with regular L1 and L2 penalty translates into
+correlation coefficients close to 1.
+- For the other model, the final weights are weakly correlated both to each other
+and to the inital values. The loss function in this case probably has many
+local minima deep enough to trap the SGD optimizer.
+"""
+
+# %%
+"""
+### Submission to the challenge
+
+With these results, we can try to build explicative factors out of the weights
+vectors found above.
+
+We proceed by picking specific vectors from the models and making a linear regression
+with this selected features.
+We select manually 1 from the regular L1 model and 1 from the regular L2 model,
+taking vectors with low correlations.
+We pick the 8 other vectors at random among the 2 remaining models.
+The selected vectors are represented in figure 10.
+"""
+
+## select features
+rng = default_rng(1234)
+idx = rng.choice(np.arange(20, 40), size=8, replace=False)
+A = np.concatenate([opt_weights[[0, 1], [7, 0]],
+                    opt_weights[idx//10, idx%10]], axis=0)
+
+##
+fig10, ax10 = plt.subplots(
+    nrows=1, ncols=1, sharex=True, sharey=True, figsize=(12, 1.2), dpi=100,
+    gridspec_kw={'left': 0.01, 'right': 0.99, 'top': 0.9, 'bottom': 0.02,
+                 'hspace': 0.4, 'wspace': 0.1})
+fig10.suptitle("Figure 10: Selected vectors for model construction",
+              x=0.02, y=0.92, ha='left')
+
+ax10.annotate('', (0.93, 0.82), (0.83, 0.82), xycoords='figure fraction',
+              arrowprops={'arrowstyle': '->', 'facecolor': 'k', 'linewidth': 2})
+fig10.text(0.88, 0.87, 'time', fontsize=11)
+
+ax10.imshow(A, cmap='seismic', vmin=-0.4, vmax=0.4)
+ax10.tick_params(left=False, labelleft=False, bottom=False, labelbottom=False)
+
+plt.show()
+
+
+# %%
+## fit
+pred = X.reshape(-1, depth) @ A.T
+beta = np.linalg.inv(pred.T @ pred) @ pred.T @ YY.ravel()
+
+##
+w = np.dot(beta, A)
+print(f'Final metric: {metric(X @ w, YY):.4f}')
+
+## reverse weights order for submission
+factors = vector_to_vectors(w[::-1])
+_ = to_csv(factors, './submission.csv')
+
+
+
+# %%
+rand_factors = vector_to_vectors(best_vector[::-1])
+
+data = to_csv(rand_factors, './submission2.csv')
+
+
+
+# %% Conclusion
+"""
+The metric obtained with this submission is 0.236, lower than the random benchmark.
+As we saw, the difficulty of the problem lies in model overfitting. The finacial data
+contains a lot of noise, while we have only about 25000 / 250 = 100 observations
+per feature dimension. Our strategy of imposing regularity for the features along the
+time axis provided regular patterns as possible explicative factors. These factors
+were robust to noise. However, mixing them failed to yield a better predictor.
+
+The approach presented here is certainly not the only possibility.
+- Other dimension reduction techniques, such as principal components analysis,
+could be used to extract common patters in prices variations.
+- Instead of learning regular factors from the data, we could use some standard
+decompositions such as discrete cosine transform or discrete wavelet transforms
+and extract the most relevant coefficients.
+- There possibly exist data augmentation techniques, which would improve the
+signal-to-noise ratio.
+"""
 
