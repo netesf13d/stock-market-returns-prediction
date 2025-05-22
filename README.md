@@ -1,4 +1,4 @@
-# stock-market-returns-prediction
+# Learning factors for stock market returns prediction
 
 This repository presents various approaches to solve QRT data challenge published in 2022. A detailed description is available [here](https://challengedata.ens.fr/participants/challenges/72/).
 
@@ -9,8 +9,11 @@ We are given a dataset consisting of daily price returns over three years for a 
 ```math
 R_{t+1} = f\left( \{ R_k \}_{k\leq t}  \right) + \epsilon_{t+1},
 ```
-
 where $\epsilon$ is a noise contribution.
+
+<p align="center">
+    <img src="https://github.com/netesf13d/stock-market-returns-prediction/blob/main/media/stocks.png" width="600" />
+</p>
 
 In the context of this project, we look for a predictor $f$ that is a linear combination of the past returns. We thus look for explicative factors $F_{i, t}$ such that the predicted returns $\hat{R}_{t+1}$ take the form:
 ```math

@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Python script version of the stock market prediction challenge.
+
+TODO
+- SGD training with multiprocessing
+- convergence vs reg and init for L2 SGD
 """
 
 import time
@@ -19,7 +23,6 @@ from sklearn.linear_model import Lasso
 # %% Data loading and preprocessing
 
 stock_returns = np.loadtxt('./X_train.csv', delimiter=',', skiprows=1)[:, 1:]
-
 
 
 # %% EDA
@@ -676,7 +679,11 @@ depth = 250
 n_steps = stock_returns.shape[1] - depth
 X = np.stack([stock_returns[:, i:i+depth] for i in range(n_steps)])
 Y = np.stack([stock_returns[:, i+depth] for i in range(n_steps)])
+YY = Y / np.sqrt(np.sum(Y**2, axis=1, keepdims=True))
+# !!!
 
+import sys
+sys.exit()
 
 # %%
 """
@@ -811,10 +818,10 @@ for i in range(niter):
     best_idx = np.argmax(res)
     if res[best_idx] > best_metric:
         best_metric = res[best_idx]
-        best_vector = vectors[best_idx]
+        random_vec = vectors[best_idx]
         print(f'iteration {i}, best metric :', best_metric)
 
-print(best_metric)
+print('Best metric for 200k random vectors: {best_metric:.4f}')
 
 """
 Not bad! We get results similar to the benchmark. Two differences though:
@@ -968,7 +975,11 @@ w0 = w0 / np.sqrt(np.sum(w0**2))
 
 ## Grid search
 grad_regs = [grad_l1_diff , grad_l2_diff, grad_l1_absdiff, grad_l2_absdiff]
-reg_param_vals = np.logspace(-3, 4, 28)
+# reg_param_vals = np.logspace(-3, 4, 28)
+# !!!
+reg_param_vals = np.concatenate([np.logspace(-3, 1, 16, endpoint=False),
+                                 np.logspace(1, 2, 10, endpoint=False),
+                                 np.logspace(2, 4, 9, endpoint=True)])
 
 sgdreg_tr_scores = np.zeros((4, len(reg_param_vals)), dtype=float)
 sgdreg_val_scores = np.zeros((4, len(reg_param_vals)), dtype=float)
@@ -1143,6 +1154,97 @@ for i, (grad_reg, reg) in enumerate(zip(grad_regs, best_reg_params)):
 
 
 # %%
+"""
+!!!
+get cv weights for the scanned param
+"""
+
+## Initial weights
+rng = default_rng(1234)
+w0 = rng.normal(size=depth)
+w0 = w0 / np.sqrt(np.sum(w0**2))
+
+reg_param_vals = np.logspace(0, 2, 21, endpoint=False)
+
+sgdreg_tr_scores = np.zeros(len(reg_param_vals), dtype=float)
+sgdreg_val_scores = np.zeros(len(reg_param_vals), dtype=float)
+final_weights = []
+
+t0 = time.time()
+for j, reg in enumerate(reg_param_vals):
+    print(j)
+    optim = SGDOptimizer(w0, learning_rate=0.005, momentum=0.9, nesterov=True)
+    grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_l2_diff(w, reg)
+
+    wt, tr_metric, val_metric, _ = sgd_cv_eval(X, YY, deepcopy(optim),
+                                              grad_func,
+                                              batch_size=16,
+                                              n_epochs=500,
+                                              random_state=1234,
+                                              cv_splits=5,
+                                              early_stopping=False,
+                                              early_stop_patience=40,
+                                              early_stop_min_delta=5e-4,
+                                              return_best_weights=True,
+                                              verbose=False)
+
+    sgdreg_val_scores[j] = val_metric
+    sgdreg_tr_scores[j] = tr_metric
+    final_weights.append(wt)
+    
+t1 = time.time()
+print(f'{len(reg_param_vals)} fits in {t1-t0:.2f} s')
+
+
+# %%
+fig8, axs8 = plt.subplots(
+    nrows=len(final_weights)+1, ncols=1, sharey=True,
+    figsize=(12, 8.5), dpi=200,
+    gridspec_kw={'left': 0.01, 'right': 0.99, 'top': 0.9, 'bottom': 0.02,
+                 'hspace': 0.4, 'wspace': 0.1})
+fig8.suptitle("Figure : CV weights convergence vs reg param (L2 regSGD)",
+              x=0.02, ha='left')
+
+axs8[0].annotate('', (0.93, 0.92), (0.83, 0.92), xycoords='figure fraction',
+                 arrowprops={'arrowstyle': '->', 'facecolor': 'k', 'linewidth': 2})
+fig8.text(0.88, 0.94, 'time', fontsize=11)
+
+axs8[0].imshow(w0[None, ...], cmap='seismic', vmin=-0.4, vmax=0.4)
+axs8[0].set_title('Initial vectors')
+axs8[0].tick_params(left=False, labelleft=False,
+                    bottom=False, labelbottom=False)
+
+for i, w in enumerate(final_weights, start=1):
+    axs8[i].imshow(w, cmap='seismic', vmin=-0.4, vmax=0.4)
+    axs8[i].tick_params(bottom=False, labelbottom=False,
+                        left=False, labelleft=False)
+    axs8[i].text(0.02, 2, f'{reg_param_vals[i-1]:.2f}', va='center')
+
+plt.show()
+
+
+
+
+# # !!!
+# grad_func = lambda X, Y, w: -grad_metric(X, Y, w) + grad_l2_diff(w, 50)
+
+# for j, wt in enumerate(init_weights):
+#     optim = SGDOptimizer(wt, learning_rate=0.005, momentum=0.9, nesterov=True)
+#     opt_wt, tr_metric, _ = sgd_train(X, YY, optim, grad_func,
+#                              batch_size=16,
+#                              n_epochs=400,
+#                              random_state=1234,
+#                              early_stopping=True,
+#                              early_stop_patience=40,
+#                              early_stop_min_delta=5e-4,
+#                              return_best_weights=True,
+#                              verbose=False)
+
+#     opt_weights[1, j] = opt_wt
+#     tr_scores[1, j] = tr_metric
+
+
+# %%
 
 fig8, axs8 = plt.subplots(
     nrows=5, ncols=1, sharex=True, sharey=True, figsize=(12, 4.5), dpi=100,
@@ -1169,7 +1271,7 @@ for i, w in enumerate(opt_weights, start=1):
 
 plt.show()
 
-"""
+r"""
 Figure 8 presents a heatmap representation of the initial weights as well as the
 optimum weights found by each model. Note that the coefficients taking into
 account more recent times are on the right.
@@ -1246,8 +1348,50 @@ local minima deep enough to trap the SGD optimizer.
 
 # %%
 """
-### Submission to the challenge
+## Submissions to the challenge
 
+
+
+### Random vector
+
+!!!
+"""
+
+## reverse weights order for submission
+factors = vector_to_vectors(random_vec[::-1])
+_ = to_csv(factors, './randvec_submission.csv')
+
+print(f'Random vector train metric: {metric(X @ random_vec, YY):.4f}')
+
+
+"""
+!!!
+Test metric : 0.00084
+"""
+
+# %%
+"""
+### Optimum found by SGD with L2 penalty
+
+!!!
+"""
+
+## reverse weights order for submission
+factors = vector_to_vectors(opt_weights[1, 0])
+_ = to_csv(factors, './L2regSGD_submission.csv')
+
+print('L2-regularized SGD train metric: '
+      f'{metric(X @ opt_weights[1, 0], YY):.4f}')
+
+"""
+!!!
+"""
+
+# %%
+"""
+### Linear combination of vectors found by SGD
+
+!!!
 With these results, we can try to build explicative factors out of the weights
 vectors found above.
 
@@ -1290,18 +1434,16 @@ beta = np.linalg.inv(pred.T @ pred) @ pred.T @ YY.ravel()
 
 ##
 w = np.dot(beta, A)
-print(f'Final metric: {metric(X @ w, YY):.4f}')
+print('Linear combination of regularized SGD factors train metric:'
+      f'{metric(X @ w, YY):.4f}')
 
 ## reverse weights order for submission
 factors = vector_to_vectors(w[::-1])
-_ = to_csv(factors, './submission.csv')
+_ = to_csv(factors, './regSGD_submission.csv')
 
-
-
-# %%
-rand_factors = vector_to_vectors(best_vector[::-1])
-
-data = to_csv(rand_factors, './submission2.csv')
+"""
+!!!
+"""
 
 
 
