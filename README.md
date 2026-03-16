@@ -12,7 +12,7 @@ R_{t+1} = f\left( \{ R_k \}_{k\leq t}  \right) + \epsilon_{t+1},
 where $\epsilon$ is a noise contribution.
 
 <p align="center">
-    <img src="https://github.com/netesf13d/stock-market-returns-prediction/blob/main/media/stocks.png" width="600" />
+    <img src="media/stocks.png" width="600" />
 </p>
 
 In the context of this project, we look for a predictor $f$ that is a linear combination of the past returns. We thus look for explicative factors $F_{i, t}$ such that the predicted returns $\hat{R}_{t+1}$ take the form:
@@ -40,7 +40,7 @@ The vectors $A_i$ can be determined empirically from financial expertise. Such e
 The parameters $\beta$ are then fit to market data. These factors have the advantage of being easily interpretable, but are fairly constrained and do not perform very well. The goal of this project is to find explicative factors directly from the data.
 
 
-## Contents and usage 
+## Contents
 
 This repository is structured as follows.
 - The Jupyter notebook `Stock_market_returns_pred.ipynb` presents the results or our study.
@@ -48,6 +48,22 @@ This repository is structured as follows.
 - The file `requirements.txt` gives the list of the project dependencies. 
 - The file `X_train.csv` contains the data for training. The targets are extracted from this file.
 
-The code runs with Python 3.12. To setup the Python environment:
-- With `pip`, with python 3.12 installed, run `pip install -r requirements.txt`
-- Using `conda`, run `conda create --name <env_name> python=3.12 --file requirements.txt`
+
+## Usage
+
+Setup the Python environment to run the examples.
+- With `pip`,
+  ```bash
+  pip install -r requirements.txt
+  ```
+- Using `conda`,
+  ```bash
+  conda create --name <env_name> --file requirements.txt
+  conda activate <env_name>
+  ```
+- Using `uv`,
+  ```bash
+  uv venv .venv
+  source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+  uv pip install -r requirements.txt
+  ```

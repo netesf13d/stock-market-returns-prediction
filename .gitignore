@@ -55,5 +55,4 @@ __pycache__/
 *.doc
 *.json
 pgdb/
-_.*/
 stuff/
